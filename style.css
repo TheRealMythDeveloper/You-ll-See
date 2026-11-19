@@ -1,0 +1,125 @@
+#hud {
+    position:fixed;
+    inset:0;
+    z-index:2;
+    pointer-events:none;
+}
+.hud-top {
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    padding:23px 28px;
+}
+.brand {
+    font-family:Orbitron,sans-serif;
+    font-weight:900;
+    letter-spacing:3px;
+    font-size:17px;
+}
+.brand small {
+    display:block;
+    color:#69758b;
+    font-size:9px;
+    letter-spacing:2px;
+    margin-top:4px;
+}
+.alive-pill {
+    padding:10px 13px;
+    border:1px solid #2a3447;
+    background:#0d1320bb;
+    border-radius:8px;
+    font-size:10px;
+    letter-spacing:1.5px;
+    color:#a6b4ca;
+}
+.alive-pill span {
+    color:white;
+    font-size:17px;
+    font-weight:900;
+    margin-right:5px;
+}
+.player-stats {
+    position:absolute;
+    left:26px;
+    top:90px;
+    display:flex;
+    flex-direction:column;
+    gap:7px;
+}
+.stat {
+    display:flex;
+    align-items:center;
+    gap:9px;
+    background:#0b101bbd;
+    border:1px solid #202b3c;
+    border-radius:7px;
+    padding:8px 11px;
+    font-size:10px;
+    letter-spacing:1px;
+    color:#a6b4ca;
+    min-width:120px;
+}
+.stat .swatch {
+    width:8px;
+    height:8px;
+    border-radius:50%;
+    box-shadow:0 0 9px currentColor;
+}
+.stat .hp {
+    margin-left:auto;
+    color:#dfe7f5;
+    letter-spacing:0;
+}
+.phase {
+    position:absolute;
+    top:50%;
+    left:50%;
+    transform:translate(-50%,-50%);
+    font-family:Orbitron,sans-serif;
+    font-size:11px;
+    letter-spacing:4px;
+    color:#ff7272;
+    opacity:0;
+    text-shadow:0 0 12px #f44;
+    transition:opacity .2;
+}
+.phase.visible {
+    opacity:.85;
+}
+.controls {
+    position:absolute;
+    bottom:19px;
+    left:0;
+    right:0;
+    text-align:center;
+    color:#65718a;
+    font-size:10px;
+    letter-spacing:1.4px;
+}
+.controls span {
+    color:#28364d;
+    margin:0 8px;
+}
+@media(max-width:600px) {
+    .menu-card {
+        padding:30px 22px;
+    }
+    .menu-card h1 {
+        font-size:52px;
+    }
+    .hud-top {
+        padding:14px;
+    }
+    .player-stats {
+        left:12px;
+        top:75px;
+    }
+    .controls {
+        font-size:8px;
+        letter-spacing:.5px;
+    }
+    .stat {
+        padding:6px 8px;
+        min-width:110px;
+    }
+}
