@@ -1,1214 +1,823 @@
+const socket = io();
 
-(() => {
-  "use strict";
+const $ = id => document.getElementById(id);
 
-  // ==========================================
-  // FLAILING
-  // Local prototype: Player vs Bots
-  // Controls: WASD / Arrow Keys
-  // ESC: Return to menu
-  // ==========================================
+const screens = {
+    menu: $("menu"),
+    lobby: $("lobby"),
+    results: $("results"),
+    hud: $("gameHud")
+};
 
-  const $ = (id) => document.getElementById(id);
+const canvas = $("game");
+const ctx = canvas.getContext("2d");
 
-  const canvas = $("game");
-  const ctx = canvas?.getContext("2d");
+let currentScreen = "menu";
+let isHost = false;
+let isReady = false;
+let gameRunning = false;
+let localPlayerId = null;
+let currentRoom = null;
+let latestState = null;
+let players = [];
+let arenaRadius = 700;
+let arenaCenter = { x: 0, y: 0 };
+let camera = { x: 0, y: 0 };
+let lastToast = null;
+let toastTimeout = null;
+let input = { up: false, down: false, left: false, right: false };
+let inputInterval = null;
+let animationFrame = null;
+let lastFrame = 0;
+let particles = [];
 
-  const menu = $("menu");
-  const result = $("result");
-  const hud = $("hud");
-
-  const startBtn = $("startButton");
-  const againBtn = $("againButton");
-  const menuBtn = $("menuButton");
-
-  const botSelect = $("botCount");
-  const sizeSelect = $("arenaSize");
-
-  const aliveEl = $("aliveCount");
-  const statsEl = $("playerStats");
-  const phaseEl = $("phase");
-
-  if (!canvas || !ctx || !menu || !result || !hud || !startBtn) {
-    console.error("FLAILING: Missing HTML elements.");
-    return;
-  }
-
-  if (!window.Matter) {
-    if (phaseEl) {
-      phaseEl.textContent =
-        "Matter.js failed to load. Check your internet and refresh.";
-    }
-    return;
-  }
-
-  // ==========================================
-  // MATTER.JS SETUP
-  // ==========================================
-
-  const {
-    Engine,
-    Bodies,
-    Body,
-    Constraint,
-    Composite,
-    Events
-  } = Matter;
-
-  const engine = Engine.create({
-    enableSleeping: false
-  });
-
-  engine.gravity.x = 0;
-  engine.gravity.y = 0;
-
-  engine.positionIterations = 8;
-  engine.velocityIterations = 6;
-  engine.constraintIterations = 4;
-
-  // ==========================================
-  // CONSTANTS
-  // ==========================================
-
-  const WORLD_WIDTH = 1200;
-  const WORLD_HEIGHT = 800;
-
-  const COLORS = [
-    ["#39e8ff", "CYAN"],
-    ["#ff4f77", "CORAL"],
-    ["#c26cff", "VIOLET"],
-    ["#ffce52", "GOLD"],
-    ["#6dff9d", "LIME"]
-  ];
-
-  const ARENA_PRESETS = {
-    large: 590,
-    medium: 490,
-    small: 395
-  };
-
-  const keys = {};
-
-  let players = [];
-  let particles = [];
-  let trails = [];
-
-  let arena = {};
-  let baseArena = {};
-
-  let scale = 1;
-  let offsetX = 0;
-  let offsetY = 0;
-
-  let running = false;
-  let finished = false;
-
-  let animationFrame = 0;
-  let startTime = 0;
-  let lastTime = 0;
-  let elapsed = 0;
-
-  let bots = 3;
-  let arenaSize = "medium";
-
-  const random = (min, max) =>
-    min + Math.random() * (max - min);
-
-  const clamp = (value, min, max) =>
-    Math.max(min, Math.min(max, value));
-
-  const distance = (a, b) =>
-    Math.hypot(a.x - b.x, a.y - b.y);
-
-  const alivePlayers = () =>
-    players.filter((player) => player.alive);
-
-  // ==========================================
-  // CANVAS RESIZING
-  // ==========================================
-
-  function resizeCanvas() {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-
-    canvas.width = window.innerWidth * dpr;
-    canvas.height = window.innerHeight * dpr;
-
+function resizeCanvas() {
+    canvas.width = window.innerWidth * devicePixelRatio;
+    canvas.height = window.innerHeight * devicePixelRatio;
     canvas.style.width = window.innerWidth + "px";
     canvas.style.height = window.innerHeight + "px";
+    ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+}
 
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+window.addEventListener("resize", resizeCanvas);
+resizeCanvas();
 
-    scale = Math.min(
-      window.innerWidth / WORLD_WIDTH,
-      window.innerHeight / WORLD_HEIGHT
-    );
+function showScreen(screen) {
+    currentScreen = screen;
 
-    offsetX = (window.innerWidth - WORLD_WIDTH * scale) / 2;
-    offsetY = (window.innerHeight - WORLD_HEIGHT * scale) / 2;
-  }
-
-  window.addEventListener("resize", resizeCanvas);
-  resizeCanvas();
-
-  // ==========================================
-  // ARENA
-  // ==========================================
-
-  function createArena() {
-    const height = ARENA_PRESETS[arenaSize] || ARENA_PRESETS.medium;
-    const width = height * 1.5;
-
-    baseArena = {
-      x: (WORLD_WIDTH - width) / 2,
-      y: (WORLD_HEIGHT - height) / 2,
-      w: width,
-      h: height
-    };
-
-    arena = { ...baseArena };
-  }
-
-  // ==========================================
-  // PLAYER CREATION
-  // ==========================================
-
-  function createPlayer(index, isHuman, spawn) {
-    const colorData = COLORS[index % COLORS.length];
-    const radius = isHuman ? 17 : 16;
-
-    const collisionGroup = -index - 1;
-
-    const body = Bodies.circle(
-      spawn.x,
-      spawn.y,
-      radius,
-      {
-        label: "player",
-        frictionAir: 0.035,
-        friction: 0,
-        restitution: 0.2,
-        density: 0.002,
-        collisionFilter: {
-          group: collisionGroup
-        }
-      }
-    );
-
-    const mace = Bodies.circle(
-      spawn.x + 45,
-      spawn.y + 6,
-      12,
-      {
-        label: "mace",
-        frictionAir: 0.008,
-        friction: 0,
-        restitution: 0.72,
-        density: 0.0018,
-        collisionFilter: {
-          group: collisionGroup
-        }
-      }
-    );
-
-    const rope = Constraint.create({
-      bodyA: body,
-      bodyB: mace,
-      length: 78,
-      stiffness: 0.075,
-      damping: 0.03,
-      render: {
-        visible: false
-      }
+    Object.values(screens).forEach(element => {
+        if (element) element.classList.add("hidden");
     });
 
-    const player = {
-      id: index,
-      name: colorData[1],
-      color: colorData[0],
+    if (screen === "menu") screens.menu?.classList.remove("hidden");
+    if (screen === "lobby") screens.lobby?.classList.remove("hidden");
+    if (screen === "results") screens.results?.classList.remove("hidden");
 
-      human: isHuman,
-
-      body,
-      mace,
-      rope,
-
-      alive: true,
-      hp: 3,
-
-      invulnerability: 0,
-      flash: 0,
-
-      aiTimer: 0,
-      target: null,
-
-      kills: 0,
-      trailTick: 0
-    };
-
-    Composite.add(engine.world, [
-      body,
-      mace,
-      rope
-    ]);
-
-    return player;
-  }
-
-  // ==========================================
-  // START GAME
-  // ==========================================
-
-  function startGame() {
-    stopLoop();
-
-    Composite.clear(engine.world, false);
-    Engine.clear(engine);
-
-    players = [];
-    particles = [];
-    trails = [];
-
-    finished = false;
-    running = true;
-
-    bots = clamp(
-      Number(botSelect?.value || 3),
-      1,
-      4
-    );
-
-    arenaSize = sizeSelect?.value || "medium";
-
-    createArena();
-
-    const playerCount = bots + 1;
-
-    const centerX = arena.x + arena.w / 2;
-    const centerY = arena.y + arena.h / 2;
-
-    const spawnRadius =
-      Math.min(arena.w, arena.h) * 0.31;
-
-    for (let i = 0; i < playerCount; i++) {
-      const angle =
-        -Math.PI / 2 + (Math.PI * 2 * i) / playerCount;
-
-      const spawn = {
-        x: centerX + Math.cos(angle) * spawnRadius,
-        y: centerY + Math.sin(angle) * spawnRadius
-      };
-
-      players.push(
-        createPlayer(i, i === 0, spawn)
-      );
-    }
-
-    startTime = performance.now();
-    lastTime = startTime;
-    elapsed = 0;
-
-    menu.classList.add("hidden");
-    result.classList.add("hidden");
-    hud.classList.remove("hidden");
-
-    updateHUD();
-
-    if (phaseEl) {
-      phaseEl.textContent = "ARENA STABLE";
-    }
-
-    animationFrame = requestAnimationFrame(gameLoop);
-  }
-
-  // ==========================================
-  // MENU / CLEANUP
-  // ==========================================
-
-  function stopLoop() {
-    if (animationFrame) {
-      cancelAnimationFrame(animationFrame);
-    }
-
-    animationFrame = 0;
-  }
-
-  function returnToMenu() {
-    running = false;
-    finished = false;
-
-    stopLoop();
-
-    Composite.clear(engine.world, false);
-    Engine.clear(engine);
-
-    players = [];
-    particles = [];
-    trails = [];
-
-    hud.classList.add("hidden");
-    result.classList.add("hidden");
-    menu.classList.remove("hidden");
-  }
-
-  // ==========================================
-  // HUD
-  // ==========================================
-
-  function updateHUD() {
-    const alive = alivePlayers();
-
-    if (aliveEl) {
-      aliveEl.textContent = String(alive.length);
-    }
-
-    if (statsEl) {
-      statsEl.innerHTML = players.map((player) => {
-        const hearts =
-          "♥".repeat(player.hp) +
-          "♡".repeat(Math.max(0, 3 - player.hp));
-
-        return `
-          <div
-            class="stat ${player.alive ? "" : "dead"}"
-            style="--player-color:${player.color}"
-          >
-            <span class="stat-dot"></span>
-            <b>${player.human ? "YOU" : "BOT " + player.id}</b>
-            <span class="stat-hearts">${hearts}</span>
-          </div>
-        `;
-      }).join("");
-    }
-  }
-
-  // ==========================================
-  // PARTICLES
-  // ==========================================
-
-  function createSparks(x, y, color, amount) {
-    for (let i = 0; i < amount; i++) {
-      const angle = random(0, Math.PI * 2);
-      const speed = random(1, 6);
-
-      particles.push({
-        x,
-        y,
-
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed,
-
-        life: random(18, 40),
-        maxLife: 40,
-
-        color,
-        radius: random(1.5, 4)
-      });
-    }
-  }
-
-  // ==========================================
-  // ELIMINATION
-  // ==========================================
-
-  function eliminate(player, reason) {
-    if (!player.alive) return;
-
-    player.alive = false;
-
-    createSparks(
-      player.body.position.x,
-      player.body.position.y,
-      player.color,
-      22
-    );
-
-    Composite.remove(engine.world, player.body);
-    Composite.remove(engine.world, player.mace);
-    Composite.remove(engine.world, player.rope);
-
-    updateHUD();
-
-    if (player.human) {
-      finishMatch(null, reason || "You fell beyond the arena.");
-    } else if (alivePlayers().length <= 1) {
-      finishMatch(alivePlayers()[0] || null);
-    }
-  }
-
-  // ==========================================
-  // MATCH END
-  // ==========================================
-
-  function finishMatch(winner, reason) {
-    if (finished) return;
-
-    finished = true;
-    running = false;
-
-    stopLoop();
-
-    hud.classList.add("hidden");
-    result.classList.remove("hidden");
-
-    if (winner && winner.human) {
-      $("resultTitle").textContent = "YOU WIN!";
-      $("resultSub").textContent =
-        "Last dot standing. You survived the flailing.";
-    } else if (winner) {
-      $("resultTitle").textContent =
-        winner.name + " WINS";
-
-      $("resultSub").textContent =
-        "A bot claimed the arena. Try again!";
+    if (screen === "game") {
+        screens.hud?.classList.remove("hidden");
+        canvas.classList.remove("hidden");
+        gameRunning = true;
+        startRendering();
     } else {
-      $("resultTitle").textContent = "ELIMINATED";
-
-      $("resultSub").textContent =
-        reason || "You were knocked out.";
+        screens.hud?.classList.add("hidden");
+        canvas.classList.add("hidden");
+        gameRunning = false;
+        stopRendering();
     }
-  }
+}
 
-  // ==========================================
-  // DAMAGE
-  // ==========================================
+function setStatus(id, message) {
+    const element = $(id);
+    if (element) element.textContent = message || "";
+}
 
-  function hitPlayer(target, attacker, speed) {
-    if (!target.alive || target.invulnerability > 0) return;
+function toast(message) {
+    const element = $("toast");
+    if (!element) return;
 
-    target.hp--;
-    target.invulnerability = 0.9;
-    target.flash = 0.25;
+    element.textContent = message;
+    element.classList.add("show");
 
-    const dx =
-      target.body.position.x - attacker.mace.position.x;
+    clearTimeout(toastTimeout);
+    toastTimeout = setTimeout(() => element.classList.remove("show"), 2600);
+}
 
-    const dy =
-      target.body.position.y - attacker.mace.position.y;
+function cleanName(name) {
+    return String(name || "").trim().slice(0, 16);
+}
 
-    const d = Math.max(1, Math.hypot(dx, dy));
+function getPlayerName() {
+    return cleanName($("playerName")?.value) || "Player";
+}
 
-    const force = clamp(speed * 0.018, 0.07, 0.25);
+function normalizePlayers(data) {
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data?.players)) return data.players;
+    if (Array.isArray(data?.room?.players)) return data.room.players;
+    if (Array.isArray(data?.state?.players)) return data.state.players;
+    return [];
+}
 
-    Body.applyForce(
-      target.body,
-      target.body.position,
-      {
-        x: (dx / d) * force,
-        y: (dy / d) * force
-      }
-    );
+function normalizeRoom(data) {
+    if (data?.room) return data.room;
+    if (data?.lobby) return data.lobby;
+    return data;
+}
 
-    Body.applyForce(
-      target.mace,
-      target.mace.position,
-      {
-        x: (dx / d) * force * 0.65,
-        y: (dy / d) * force * 0.65
-      }
-    );
+function getPlayerId(player) {
+    return player?.id ?? player?.playerId ?? player?.socketId ?? player?.userId;
+}
 
-    createSparks(
-      target.body.position.x,
-      target.body.position.y,
-      target.color,
-      13
-    );
+function getPlayerNameFromData(player) {
+    return player?.name ?? player?.username ?? player?.playerName ?? "Player";
+}
 
-    if (target.hp <= 0) {
-      eliminate(target, "");
-    }
+function getPlayerColor(player, index) {
+    return player?.color || player?.hex || player?.colour || [
+        "#ff5267",
+        "#38bdf8",
+        "#a855f7",
+        "#fbbf24",
+        "#39e98b"
+    ][index % 5];
+}
 
-    updateHUD();
-  }
+function isPlayerReady(player) {
+    return player?.ready === true || player?.isReady === true;
+}
 
-  // ==========================================
-  // COLLISIONS
-  // ==========================================
+function isPlayerHost(player) {
+    return player?.host === true || player?.isHost === true;
+}
 
-  const hitCooldowns = new Map();
+function updateLobby(data) {
+    const room = normalizeRoom(data);
+    if (!room) return;
 
-  Events.on(engine, "collisionStart", (event) => {
-    for (const pair of event.pairs) {
-      const bodyA = pair.bodyA;
-      const bodyB = pair.bodyB;
+    currentRoom = room;
+    players = normalizePlayers(room);
 
-      const playerA = players.find(
-        (p) => p.alive &&
-          (p.body === bodyA || p.mace === bodyA)
-      );
+    const code = room.code || room.roomCode || room.id || "";
+    $("roomCodeDisplay").textContent = code;
+    $("playerCount").textContent = `${players.length}/5 PLAYERS`;
 
-      const playerB = players.find(
-        (p) => p.alive &&
-          (p.body === bodyB || p.mace === bodyB)
-      );
+    const hostId = room.hostId || room.host || room.ownerId;
+    const me = players.find(player => getPlayerId(player) === localPlayerId);
 
-      if (!playerA || !playerB || playerA === playerB) {
-        continue;
-      }
-
-      const maceA = playerA.mace === bodyA;
-      const maceB = playerB.mace === bodyB;
-
-      if (!maceA && !maceB) continue;
-
-      const attacker = maceA ? playerA : playerB;
-      const target = maceA ? playerB : playerA;
-
-      const key = attacker.id + ":" + target.id;
-
-      if ((hitCooldowns.get(key) || 0) > 0) {
-        continue;
-      }
-
-      const speed = Math.hypot(
-        attacker.mace.velocity.x,
-        attacker.mace.velocity.y
-      );
-
-      if (speed < 3.5) continue;
-
-      hitCooldowns.set(key, 0.5);
-
-      hitPlayer(target, attacker, speed);
-    }
-  });
-
-  // ==========================================
-  // PLAYER INPUT
-  // ==========================================
-
-  function getHumanDirection() {
-    let x = 0;
-    let y = 0;
-
-    if (keys.w || keys.arrowup) y--;
-    if (keys.s || keys.arrowdown) y++;
-    if (keys.a || keys.arrowleft) x--;
-    if (keys.d || keys.arrowright) x++;
-
-    const length = Math.hypot(x, y) || 1;
-
-    return {
-      x: x / length,
-      y: y / length
-    };
-  }
-
-  // ==========================================
-  // BOT AI
-  // ==========================================
-
-  function getBotDirection(player, dt) {
-    player.aiTimer -= dt;
-
-    if (player.aiTimer <= 0 || !player.target?.alive) {
-      player.aiTimer = random(0.22, 0.5);
-
-      player.target = alivePlayers()
-        .filter((other) => other !== player)
-        .sort(
-          (a, b) =>
-            distance(player.body.position, a.body.position) -
-            distance(player.body.position, b.body.position)
-        )[0] || null;
+    if (me) {
+        isHost = isPlayerHost(me) || getPlayerId(me) === hostId;
+        isReady = isPlayerReady(me);
+    } else if (hostId) {
+        isHost = hostId === localPlayerId;
     }
 
-    if (!player.target) {
-      return { x: 0, y: 0 };
+    renderLobbyPlayers(players);
+
+    const readyButton = $("readyButton");
+    if (readyButton) {
+        readyButton.textContent = isReady ? "NOT READY" : "READY UP";
+        readyButton.classList.toggle("ready", isReady);
     }
 
-    let x =
-      player.target.body.position.x -
-      player.body.position.x;
-
-    let y =
-      player.target.body.position.y -
-      player.body.position.y;
-
-    let d = Math.max(1, Math.hypot(x, y));
-
-    x /= d;
-    y /= d;
-
-    const margin = 110;
-
-    const left = arena.x + margin;
-    const right = arena.x + arena.w - margin;
-    const top = arena.y + margin;
-    const bottom = arena.y + arena.h - margin;
-
-    const pos = player.body.position;
-
-    if (pos.x < left) {
-      x += ((left - pos.x) / margin) * 1.8;
+    const startButton = $("startButton");
+    if (startButton) {
+        startButton.classList.toggle("hidden", !isHost);
+        startButton.disabled = players.length < 2 || players.some(player => !isPlayerReady(player) && !isPlayerHost(player) && getPlayerId(player) !== hostId);
     }
 
-    if (pos.x > right) {
-      x -= ((pos.x - right) / margin) * 1.8;
+    const arenaSelect = $("arenaSizeSelect");
+    if (arenaSelect) {
+        arenaSelect.disabled = !isHost;
+        const arenaValue = room.arenaSize || room.arena || room.settings?.arenaSize;
+        if (arenaValue && [...arenaSelect.options].some(option => option.value === String(arenaValue))) {
+            arenaSelect.value = String(arenaValue);
+        }
     }
 
-    if (pos.y < top) {
-      y += ((top - pos.y) / margin) * 1.8;
-    }
+    showScreen("lobby");
+}
 
-    if (pos.y > bottom) {
-      y -= ((pos.y - bottom) / margin) * 1.8;
-    }
+function renderLobbyPlayers(list) {
+    const container = $("playerList");
+    if (!container) return;
 
-    d = Math.max(1, Math.hypot(x, y));
+    container.innerHTML = "";
 
-    return {
-      x: x / d,
-      y: y / d
-    };
-  }
+    list.forEach((player, index) => {
+        const id = getPlayerId(player);
+        const color = getPlayerColor(player, index);
+        const name = getPlayerNameFromData(player);
+        const ready = isPlayerReady(player);
+        const host = isPlayerHost(player) || id === (currentRoom?.hostId || currentRoom?.host);
 
-  // ==========================================
-  // MOVEMENT
-  // ==========================================
+        const card = document.createElement("div");
+        card.className = "player-card";
 
-  function movePlayer(player, direction, dt) {
-    if (!player.alive) return;
+        const left = document.createElement("div");
+        left.className = "player-name";
 
-    const force = player.human ? 0.0018 : 0.0014;
+        const dot = document.createElement("span");
+        dot.className = "player-color";
+        dot.style.background = color;
+        dot.style.color = color;
 
-    Body.applyForce(
-      player.body,
-      player.body.position,
-      {
-        x: direction.x * force,
-        y: direction.y * force
-      }
-    );
+        const nameText = document.createElement("span");
+        nameText.textContent = name + (id === localPlayerId ? " (YOU)" : "") + (host ? " ★" : "");
 
-    Body.applyForce(
-      player.mace,
-      player.mace.position,
-      {
-        x: direction.x * force * 0.55,
-        y: direction.y * force * 0.55
-      }
-    );
+        left.append(dot, nameText);
 
-    const maxSpeed = player.human ? 6.8 : 5.8;
+        const status = document.createElement("span");
+        status.className = "player-status" + (ready ? "" : " not-ready");
+        status.textContent = ready ? "READY" : "WAITING";
 
-    const speed = Math.hypot(
-      player.body.velocity.x,
-      player.body.velocity.y
-    );
-
-    if (speed > maxSpeed) {
-      Body.setVelocity(player.body, {
-        x: (player.body.velocity.x * maxSpeed) / speed,
-        y: (player.body.velocity.y * maxSpeed) / speed
-      });
-    }
-
-    player.invulnerability = Math.max(
-      0,
-      player.invulnerability - dt
-    );
-
-    player.flash = Math.max(
-      0,
-      player.flash - dt
-    );
-
-    player.trailTick++;
-
-    if (player.trailTick % 3 === 0) {
-      trails.push({
-        x: player.mace.position.x,
-        y: player.mace.position.y,
-        color: player.color,
-        life: 0.22,
-        maxLife: 0.22
-      });
-    }
-  }
-
-  // ==========================================
-  // ARENA SHRINKING
-  // ==========================================
-
-  function updateArena(dt) {
-    const progress = clamp(elapsed / 145, 0, 1);
-
-    const targetWidth =
-      baseArena.w * (1 - progress) + 300 * progress;
-
-    const targetHeight =
-      baseArena.h * (1 - progress) + 210 * progress;
-
-    const smooth = 1 - Math.pow(0.001, dt);
-
-    arena.w += (targetWidth - arena.w) * smooth;
-    arena.h += (targetHeight - arena.h) * smooth;
-
-    arena.x = (WORLD_WIDTH - arena.w) / 2;
-    arena.y = (WORLD_HEIGHT - arena.h) / 2;
-
-    if (phaseEl) {
-      phaseEl.textContent =
-        elapsed < 25
-          ? "ARENA STABLE"
-          : elapsed < 55
-            ? "SHRINKING: PHASE 1"
-            : elapsed < 95
-              ? "SHRINKING: PHASE 2"
-              : "FINAL COLLAPSE";
-    }
-
-    for (const player of [...alivePlayers()]) {
-      const pos = player.body.position;
-      const margin = 24;
-
-      if (
-        pos.x < arena.x - margin ||
-        pos.x > arena.x + arena.w + margin ||
-        pos.y < arena.y - margin ||
-        pos.y > arena.y + arena.h + margin
-      ) {
-        eliminate(player, "outside the shrinking arena");
-      }
-    }
-  }
-
-  // ==========================================
-  // EFFECTS
-  // ==========================================
-
-  function updateEffects(dt) {
-    trails.forEach((trail) => {
-      trail.life -= dt;
+        card.append(left, status);
+        container.appendChild(card);
     });
 
-    trails = trails.filter((trail) => trail.life > 0);
+    for (let i = list.length; i < 5; i++) {
+        const empty = document.createElement("div");
+        empty.className = "player-card";
+        empty.style.opacity = "0.35";
+        empty.textContent = "Waiting for player...";
+        container.appendChild(empty);
+    }
+}
 
-    particles.forEach((particle) => {
-      particle.x += particle.vx;
-      particle.y += particle.vy;
+function createRoom() {
+    const name = getPlayerName();
+    socket.emit("room:create", { name });
+    setStatus("menuStatus", "Creating room...");
+}
 
-      particle.vx *= 0.97;
-      particle.vy *= 0.97;
+function joinRoom() {
+    const name = getPlayerName();
+    const code = $("roomCodeInput")?.value.trim().toUpperCase();
 
-      particle.life--;
+    if (!code) {
+        setStatus("menuStatus", "Enter a room code.");
+        return;
+    }
+
+    socket.emit("room:join", { name, code });
+    setStatus("menuStatus", "Joining room...");
+}
+
+function toggleReady() {
+    if (!currentRoom) return;
+    isReady = !isReady;
+    socket.emit("player:ready", isReady);
+}
+
+function startGame() {
+    if (!isHost) return;
+    socket.emit("game:start");
+}
+
+function leaveRoom() {
+    socket.emit("room:leave");
+    currentRoom = null;
+    latestState = null;
+    players = [];
+    isHost = false;
+    isReady = false;
+    localPlayerId = null;
+    clearInputs();
+    showScreen("menu");
+}
+
+function requestRematch() {
+    socket.emit("game:rematch");
+}
+
+function copyRoomCode() {
+    const code = $("roomCodeDisplay")?.textContent;
+    if (!code) return;
+
+    if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(code)
+            .then(() => toast("ROOM CODE COPIED"))
+            .catch(() => toast(code));
+    } else {
+        toast(code);
+    }
+}
+
+function bindButtons() {
+    $("createButton")?.addEventListener("click", createRoom);
+    $("joinButton")?.addEventListener("click", joinRoom);
+    $("readyButton")?.addEventListener("click", toggleReady);
+    $("startButton")?.addEventListener("click", startGame);
+    $("copyCodeButton")?.addEventListener("click", copyRoomCode);
+    $("leaveButton")?.addEventListener("click", leaveRoom);
+    $("resultsLeaveButton")?.addEventListener("click", leaveRoom);
+    $("rematchButton")?.addEventListener("click", requestRematch);
+    $("gameLeaveButton")?.addEventListener("click", leaveRoom);
+
+    $("arenaSizeSelect")?.addEventListener("change", event => {
+        if (!isHost) return;
+        socket.emit("host:arena", event.target.value);
     });
 
-    particles = particles.filter(
-      (particle) => particle.life > 0
-    );
+    $("roomCodeInput")?.addEventListener("input", event => {
+        event.target.value = event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);
+    });
 
-    for (const [key, value] of hitCooldowns) {
-      hitCooldowns.set(
-        key,
-        Math.max(0, value - dt)
-      );
+    $("playerName")?.addEventListener("keydown", event => {
+        if (event.key === "Enter") createRoom();
+    });
+
+    $("roomCodeInput")?.addEventListener("keydown", event => {
+        if (event.key === "Enter") joinRoom();
+    });
+}
+
+const keyMap = {
+    w: "up",
+    ArrowUp: "up",
+    s: "down",
+    ArrowDown: "down",
+    a: "left",
+    ArrowLeft: "left",
+    d: "right",
+    ArrowRight: "right"
+};
+
+function handleKeyDown(event) {
+    if (currentScreen !== "game") return;
+
+    const key = keyMap[event.key];
+    if (!key) return;
+
+    event.preventDefault();
+    input[key] = true;
+}
+
+function handleKeyUp(event) {
+    const key = keyMap[event.key];
+    if (!key) return;
+
+    input[key] = false;
+}
+
+function clearInputs() {
+    input.up = false;
+    input.down = false;
+    input.left = false;
+    input.right = false;
+}
+
+window.addEventListener("keydown", handleKeyDown);
+window.addEventListener("keyup", handleKeyUp);
+window.addEventListener("blur", clearInputs);
+
+function startInputLoop() {
+    stopInputLoop();
+
+    inputInterval = setInterval(() => {
+        if (currentScreen !== "game") return;
+        socket.emit("game:input", { ...input });
+    }, 50);
+}
+
+function stopInputLoop() {
+    if (inputInterval) clearInterval(inputInterval);
+    inputInterval = null;
+}
+
+function startRendering() {
+    if (animationFrame) return;
+    lastFrame = performance.now();
+    animationFrame = requestAnimationFrame(renderLoop);
+}
+
+function stopRendering() {
+    if (!animationFrame) return;
+    cancelAnimationFrame(animationFrame);
+    animationFrame = null;
+}
+
+function renderLoop(now) {
+    animationFrame = requestAnimationFrame(renderLoop);
+
+    const dt = Math.min((now - lastFrame) / 1000, 0.05);
+    lastFrame = now;
+
+    updateParticles(dt);
+    drawGame();
+}
+
+function getNumber(object, keys, fallback = 0) {
+    for (const key of keys) {
+        const value = object?.[key];
+        if (typeof value === "number" && Number.isFinite(value)) return value;
     }
-  }
+    return fallback;
+}
 
-  // ==========================================
-  // MAIN GAME LOOP
-  // ==========================================
-
-  function gameLoop(now) {
-    animationFrame = 0;
-
-    if (!running || finished) return;
-
-    const dt = clamp(
-      (now - lastTime) / 1000,
-      0,
-      0.033
-    );
-
-    lastTime = now;
-    elapsed = (now - startTime) / 1000;
-
-    for (const player of alivePlayers()) {
-      const direction = player.human
-        ? getHumanDirection()
-        : getBotDirection(player, dt);
-
-      movePlayer(player, direction, dt);
+function getPosition(object, keys, fallback = null) {
+    for (const key of keys) {
+        const value = object?.[key];
+        if (value && typeof value.x === "number" && typeof value.y === "number") {
+            return value;
+        }
     }
+    return fallback;
+}
 
-    Engine.update(engine, dt * 1000);
+function normalizeGameState(data) {
+    const state = data?.state || data?.game || data || {};
+    const list = normalizePlayers(state);
+    if (list.length) players = list;
 
-    updateArena(dt);
-    updateEffects(dt);
-    draw();
+    const arena = state.arena || data?.arena || {};
+    arenaRadius = getNumber(arena, ["radius", "size", "currentRadius"], getNumber(state, ["arenaRadius", "radius"], arenaRadius));
+    arenaCenter = getPosition(arena, ["center", "position"], {
+        x: getNumber(arena, ["x", "centerX"], 0),
+        y: getNumber(arena, ["y", "centerY"], 0)
+    });
 
-    if (running && !finished) {
-      animationFrame = requestAnimationFrame(gameLoop);
-    }
-  }
+    latestState = state;
+    return state;
+}
 
-  // ==========================================
-  // DRAWING
-  // ==========================================
+function getPlayerPosition(player) {
+    return getPosition(player, ["position", "pos"], {
+        x: getNumber(player, ["x", "px"], 0),
+        y: getNumber(player, ["y", "py"], 0)
+    });
+}
 
-  function draw() {
-    ctx.clearRect(
-      0,
-      0,
-      window.innerWidth,
-      window.innerHeight
-    );
+function getFlailPosition(player) {
+    const direct = getPosition(player, ["flail", "mace", "weaponPosition", "ball", "macePosition"]);
+    if (direct) return direct;
 
-    ctx.save();
+    const x = getNumber(player, ["flailX", "maceX", "ballX", "weaponX"], NaN);
+    const y = getNumber(player, ["flailY", "maceY", "ballY", "weaponY"], NaN);
 
-    ctx.translate(offsetX, offsetY);
-    ctx.scale(scale, scale);
+    if (Number.isFinite(x) && Number.isFinite(y)) return { x, y };
 
-    drawBackground();
-    drawArena();
-    drawEffects();
+    const pos = getPlayerPosition(player);
+    const angle = getNumber(player, ["angle", "flailAngle", "swingAngle"], 0);
+    const length = getNumber(player, ["chainLength", "flailLength", "weaponLength"], 70);
 
-    for (const player of players) {
-      if (player.alive) {
-        drawPlayer(player);
-      }
-    }
+    return {
+        x: pos.x + Math.cos(angle) * length,
+        y: pos.y + Math.sin(angle) * length
+    };
+}
 
-    ctx.restore();
-  }
+function getAlive(player) {
+    return player?.alive !== false && player?.eliminated !== true && player?.dead !== true;
+}
 
-  function drawBackground() {
-    const gradient = ctx.createLinearGradient(
-      0, 0, WORLD_WIDTH, WORLD_HEIGHT
-    );
+function worldToScreen(x, y) {
+    return {
+        x: x - camera.x + window.innerWidth / 2,
+        y: y - camera.y + window.innerHeight / 2
+    };
+}
 
-    gradient.addColorStop(0, "#070a17");
-    gradient.addColorStop(1, "#101229");
+function drawBackground() {
+    const width = window.innerWidth;
+    const height = window.innerHeight;
 
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    ctx.fillStyle = "#080b12";
+    ctx.fillRect(0, 0, width, height);
 
-    ctx.strokeStyle = "rgba(100,115,165,0.13)";
+    const grid = 48;
+    const offsetX = ((-camera.x + width / 2) % grid + grid) % grid;
+    const offsetY = ((-camera.y + height / 2) % grid + grid) % grid;
+
+    ctx.beginPath();
+    ctx.strokeStyle = "rgba(110,130,170,0.055)";
     ctx.lineWidth = 1;
 
-    for (let x = 0; x <= WORLD_WIDTH; x += 48) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, WORLD_HEIGHT);
-      ctx.stroke();
+    for (let x = offsetX; x < width; x += grid) {
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, height);
     }
 
-    for (let y = 0; y <= WORLD_HEIGHT; y += 48) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(WORLD_WIDTH, y);
-      ctx.stroke();
+    for (let y = offsetY; y < height; y += grid) {
+        ctx.moveTo(0, y);
+        ctx.lineTo(width, y);
     }
-  }
 
-  function drawArena() {
+    ctx.stroke();
+
+    const glow = ctx.createRadialGradient(width / 2, height / 2, 20, width / 2, height / 2, Math.max(width, height) * 0.75);
+    glow.addColorStop(0, "rgba(99,102,241,0.055)");
+    glow.addColorStop(1, "rgba(8,11,18,0)");
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, width, height);
+}
+
+function drawArena() {
+    const center = worldToScreen(arenaCenter.x, arenaCenter.y);
+    const radius = Math.max(50, arenaRadius);
+
     ctx.save();
 
-    const color = elapsed > 25 ? "#ff4268" : "#6b82ff";
+    ctx.beginPath();
+    ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(18,24,38,0.65)";
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(168,85,247,0.65)";
+    ctx.lineWidth = 4;
+    ctx.shadowColor = "#a855f7";
+    ctx.shadowBlur = 18;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    ctx.beginPath();
+    ctx.arc(center.x, center.y, radius - 12, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(129,140,248,0.18)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([8, 12]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.restore();
+}
+
+function drawChain(start, end, color) {
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = 0.75;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(start.x, start.y);
+    ctx.lineTo(end.x, end.y);
+    ctx.stroke();
+
+    const distance = Math.hypot(end.x - start.x, end.y - start.y);
+    const links = Math.max(3, Math.floor(distance / 12));
+
+    for (let i = 1; i < links; i++) {
+        const t = i / links;
+        const x = start.x + (end.x - start.x) * t;
+        const y = start.y + (end.y - start.y) * t;
+
+        ctx.beginPath();
+        ctx.arc(x, y, 2, 0, Math.PI * 2);
+        ctx.fillStyle = "#d6d9e5";
+        ctx.fill();
+    }
+
+    ctx.restore();
+}
+
+function drawFlail(position, color, radius = 13) {
+    ctx.save();
 
     ctx.shadowColor = color;
-    ctx.shadowBlur = 22;
-
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 7;
-
-    ctx.strokeRect(
-      arena.x,
-      arena.y,
-      arena.w,
-      arena.h
-    );
-
-    ctx.shadowBlur = 0;
-
-    ctx.strokeStyle = "rgba(255,255,255,0.08)";
-    ctx.lineWidth = 2;
-
-    ctx.strokeRect(
-      arena.x + 12,
-      arena.y + 12,
-      arena.w - 24,
-      arena.h - 24
-    );
-
-    ctx.fillStyle = color;
-
-    const size = 24;
-
-    const corners = [
-      [arena.x, arena.y, 1, 1],
-      [arena.x + arena.w, arena.y, -1, 1],
-      [arena.x, arena.y + arena.h, 1, -1],
-      [arena.x + arena.w, arena.y + arena.h, -1, -1]
-    ];
-
-    for (const [x, y, sx, sy] of corners) {
-      ctx.beginPath();
-
-      ctx.moveTo(x, y);
-      ctx.lineTo(x + sx * size, y);
-      ctx.lineTo(x, y + sy * size);
-
-      ctx.closePath();
-      ctx.fill();
-    }
-
-    ctx.restore();
-  }
-
-  function drawEffects() {
-    for (const trail of trails) {
-      ctx.globalAlpha =
-        Math.max(0, trail.life / trail.maxLife) * 0.45;
-
-      ctx.fillStyle = trail.color;
-
-      ctx.beginPath();
-      ctx.arc(trail.x, trail.y, 5, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    ctx.globalAlpha = 1;
-
-    for (const particle of particles) {
-      ctx.globalAlpha =
-        clamp(particle.life / particle.maxLife, 0, 1);
-
-      ctx.fillStyle = particle.color;
-
-      ctx.beginPath();
-      ctx.arc(
-        particle.x,
-        particle.y,
-        particle.radius,
-        0,
-        Math.PI * 2
-      );
-
-      ctx.fill();
-    }
-
-    ctx.globalAlpha = 1;
-  }
-
-  // ==========================================
-  // PLAYER RENDERING
-  // ==========================================
-
-  function drawPlayer(player) {
-    const body = player.body.position;
-    const mace = player.mace.position;
-    const velocity = player.mace.velocity;
-
-    const maceSpeed = Math.hypot(
-      velocity.x,
-      velocity.y
-    );
-
-    const angle = Math.atan2(
-      mace.y - body.y,
-      mace.x - body.x
-    );
-
-    ctx.save();
-    ctx.lineCap = "round";
-
-    // Chain
-    ctx.strokeStyle = "rgba(225,238,255,0.82)";
-    ctx.lineWidth = 3;
-
-    ctx.beginPath();
-    ctx.moveTo(body.x, body.y);
-    ctx.lineTo(mace.x, mace.y);
-    ctx.stroke();
-
-    ctx.strokeStyle = player.color;
-    ctx.lineWidth = 1.3;
-
-    ctx.beginPath();
-    ctx.moveTo(body.x, body.y);
-    ctx.lineTo(mace.x, mace.y);
-    ctx.stroke();
-
-    // Flail
-    ctx.shadowColor = player.color;
     ctx.shadowBlur = 20;
 
-    ctx.fillStyle = player.color;
+    const gradient = ctx.createRadialGradient(position.x - 4, position.y - 4, 2, position.x, position.y, radius);
+    gradient.addColorStop(0, "#ffffff");
+    gradient.addColorStop(0.25, color);
+    gradient.addColorStop(1, "#151923");
 
     ctx.beginPath();
-    ctx.arc(mace.x, mace.y, 13, 0, Math.PI * 2);
+    ctx.arc(position.x, position.y, radius, 0, Math.PI * 2);
+    ctx.fillStyle = gradient;
     ctx.fill();
 
     ctx.shadowBlur = 0;
-
-    ctx.fillStyle = "#f5fbff";
-
-    ctx.beginPath();
-    ctx.arc(mace.x, mace.y, 4, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Player
-    ctx.shadowColor = player.color;
-    ctx.shadowBlur = 18;
-
-    ctx.fillStyle =
-      player.flash > 0 ? "#ffffff" : player.color;
-
-    ctx.beginPath();
-    ctx.arc(body.x, body.y, 17, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.shadowBlur = 0;
-
-    ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 2;
-
-    ctx.beginPath();
-    ctx.arc(body.x, body.y, 20, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(255,255,255,0.7)";
+    ctx.lineWidth = 1.5;
     ctx.stroke();
 
-    ctx.fillStyle = "#07101e";
-
-    ctx.beginPath();
-    ctx.arc(body.x, body.y, 6, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Name
-    ctx.font = "bold 14px Inter, Arial";
-    ctx.textAlign = "center";
-    ctx.fillStyle = player.color;
-
-    ctx.fillText(
-      player.human ? "YOU" : "BOT " + player.id,
-      body.x,
-      body.y - 29
-    );
-
-    // Health
-    ctx.font = "16px Arial";
-
-    ctx.fillText(
-      "♥".repeat(player.hp) +
-      "♡".repeat(Math.max(0, 3 - player.hp)),
-      body.x,
-      body.y + 38
-    );
-
-    // Speed arc
-    if (maceSpeed > 4.8) {
-      ctx.strokeStyle = player.color;
-      ctx.globalAlpha = 0.3;
-      ctx.lineWidth = 4;
-
-      ctx.beginPath();
-
-      ctx.arc(
-        mace.x,
-        mace.y,
-        22 + maceSpeed * 2,
-        angle - 0.9,
-        angle + 0.9
-      );
-
-      ctx.stroke();
-    }
-
     ctx.restore();
-  }
+}
 
-  // ==========================================
-  // INPUT
-  // ==========================================
+function drawPlayer(player, index) {
+    if (!getAlive(player)) return;
 
-  window.addEventListener("keydown", (event) => {
-    const key = event.key.toLowerCase();
+    const id = getPlayerId(player);
+    const color = getPlayerColor(player, index);
+    const worldPos = getPlayerPosition(player);
+    const flailWorld = getFlailPosition(player);
+    const pos = worldToScreen(worldPos.x, worldPos.y);
+    const flail = worldToScreen(flailWorld.x, flailWorld.y);
+    const isMe = id === localPlayerId;
+    const radius = getNumber(player, ["radius", "size"], 17);
 
-    keys[key] = true;
-
-    if (
-      [
-        "w", "a", "s", "d",
-        "arrowup", "arrowdown",
-        "arrowleft", "arrowright",
-        " "
-      ].includes(key)
-    ) {
-      event.preventDefault();
-    }
-
-    if (key === "escape" && running) {
-      returnToMenu();
-    }
-  });
-
-  window.addEventListener("keyup", (event) => {
-    keys[event.key.toLowerCase()] = false;
-  });
-
-  window.addEventListener("blur", () => {
-    for (const key in keys) {
-      keys[key] = false;
-    }
-  });
-
-  // ==========================================
-  // BUTTONS
-  // ==========================================
-
-  startBtn.addEventListener("click", startGame);
-
-  if (againBtn) {
-    againBtn.addEventListener("click", startGame);
-  }
-
-  if (menuBtn) {
-    menuBtn.addEventListener("click", returnToMenu);
-  }
-
-  // ==========================================
-  // MENU BACKGROUND
-  // ==========================================
-
-  function idleDraw() {
-    if (running) return;
-
-    ctx.clearRect(
-      0,
-      0,
-      window.innerWidth,
-      window.innerHeight
-    );
+    drawChain(pos, flail, color);
+    drawFlail(flail, color, getNumber(player, ["flailRadius", "maceRadius"], 13));
 
     ctx.save();
 
-    ctx.translate(offsetX, offsetY);
-    ctx.scale(scale, scale);
+    ctx.shadowColor = color;
+    ctx.shadowBlur = isMe ? 25 : 15;
 
-    drawBackground();
+    const gradient = ctx.createRadialGradient(pos.x - 6, pos.y - 6, 2, pos.x, pos.y, radius);
+    gradient.addColorStop(0, "#ffffff");
+    gradient.addColorStop(0.3, color);
+    gradient.addColorStop(1, color);
 
-    const savedArena = arena;
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
+    ctx.fillStyle = gradient;
+    ctx.fill();
 
-    arena = {
-      x: 155,
-      y: 115,
-      w: 890,
-      h: 570
-    };
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = isMe ? "#ffffff" : "rgba(255,255,255,0.6)";
+    ctx.lineWidth = isMe ? 2.5 : 1.2;
+    ctx.stroke();
 
-    drawArena();
+    if (isMe) {
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, radius + 6, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(255,255,255,0.3)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+    }
 
-    arena = savedArena;
+    ctx.font = "600 12px Inter";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    ctx.fillStyle = "#ffffff";
+    ctx.shadowColor = "#000000";
+    ctx.shadowBlur = 8;
+    ctx.fillText(getPlayerNameFromData(player), pos.x, pos.y - radius - 10);
 
     ctx.restore();
+}
 
-    requestAnimationFrame(idleDraw);
-  }
+function drawGame() {
+    drawBackground();
 
-  idleDraw();
+    if (!latestState) return;
 
-})();
+    const alivePlayers = players.filter(getAlive);
+    const myPlayer = players.find(player => getPlayerId(player) === localPlayerId);
+    const myPosition = myPlayer ? getPlayerPosition(myPlayer) : arenaCenter;
 
+    camera.x = myPosition.x;
+    camera.y = myPosition.y;
 
+    drawBackground();
+    drawArena();
+
+    players.forEach(drawPlayer);
+
+    const aliveElement = $("aliveCount");
+    if (aliveElement) aliveElement.textContent = `ALIVE: ${alivePlayers.length}`;
+
+    const phaseElement = $("phaseLabel");
+    if (phaseElement) {
+        phaseElement.textContent = latestState.phase || latestState.status || "ARENA";
+    }
+
+    updatePlayerStats(myPlayer);
+}
+
+function updatePlayerStats(player) {
+    const element = $("gamePlayerStats");
+    if (!element || !player) return;
+
+    const speed = getNumber(player, ["speed", "velocity"], 0);
+    const hits = getNumber(player, ["hits", "hitCount", "kills"], 0);
+
+    element.textContent = `SPEED ${Math.round(speed)}  ·  HITS ${hits}`;
+}
+
+function spawnParticles(x, y, color, amount = 14) {
+    for (let i = 0; i < amount; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 80 + Math.random() * 300;
+
+        particles.push({
+            x,
+            y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            life: 0.3 + Math.random() * 0.5,
+            maxLife: 0.8,
+            color,
+            size: 2 + Math.random() * 4
+        });
+    }
+}
+
+function updateParticles(dt) {
+    particles = particles.filter(particle => {
+        particle.life -= dt;
+        particle.x += particle.vx * dt;
+        particle.y += particle.vy * dt;
+        particle.vx *= 0.97;
+        particle.vy *= 0.97;
+        return particle.life > 0;
+    });
+
+    if (particles.length > 250) particles.splice(0, particles.length - 250);
+}
+
+function drawParticles() {
+    particles.forEach(particle => {
+        const pos = worldToScreen(particle.x, particle.y);
+        ctx.globalAlpha = Math.max(0, particle.life / particle.maxLife);
+        ctx.fillStyle = particle.color;
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, particle.size, 0, Math.PI * 2);
+        ctx.fill();
+    });
+
+    ctx.globalAlpha = 1;
+}
+
+bindButtons();
+showScreen("menu");
+startInputLoop();
+
+socket.on("connect", () => {
+    localPlayerId = socket.id;
+    setStatus("menuStatus", "Connected");
+});
+
+socket.on("connection:ready", data => {
+    localPlayerId = data?.id || data?.socketId || socket.id;
+});
+
+socket.on("room:joined", data => {
+    const room = normalizeRoom(data);
+    currentRoom = room;
+    localPlayerId = data?.playerId || data?.id || socket.id;
+    setStatus("menuStatus", "");
+    updateLobby(data);
+    toast("ROOM JOINED");
+});
+
+socket.on("lobby:update", data => {
+    updateLobby(data);
+});
+
+socket.on("room:error", data => {
+    const message = typeof data === "string" ? data : data?.message || data?.error || "Unable to join room.";
+    setStatus("menuStatus", message);
+    setStatus("lobbyStatus", message);
+    toast(message);
+});
+
+socket.on("game:start", data => {
+    normalizeGameState(data);
+    showScreen("game");
+    toast("FIGHT!");
+});
+
+socket.on("game:tick", data => {
+    normalizeGameState(data);
+});
+
+socket.on("player:hit", data => {
+    const player = players.find(item => getPlayerId(item) === (data?.targetId || data?.playerId || data?.id));
+    if (player) {
+        const position = getPlayerPosition(player);
+        spawnParticles(position.x, position.y, getPlayerColor(player, players.indexOf(player)), 20);
+    }
+    toast("HIT!");
+});
+
+socket.on("player:eliminated", data => {
+    const player = players.find(item => getPlayerId(item) === (data?.playerId || data?.id));
+    if (player) {
+        const position = getPlayerPosition(player);
+        spawnParticles(position.x, position.y, getPlayerColor(player, players.indexOf(player)), 30);
+    }
+});
+
+socket.on("game:over", data => {
+    gameRunning = false;
+    showResults(data);
+});
+
+socket.on("game:rematch", data => {
+    normalizeGameState(data);
+    showScreen("lobby");
+    toast("REMATCH!");
+});
+
+socket.on("disconnect", () => {
+    clearInputs();
+    toast("DISCONNECTED");
+});
+
+function showResults(data) {
+    const list = normalizePlayers(data);
+    const winner = data?.winner || data?.winnerPlayer || data?.result?.winner;
+    const winnerId = typeof winner === "object" ? getPlayerId(winner) : winner;
+    const winnerName = typeof winner === "object" ? getPlayerNameFromData(winner) : data?.winnerName || players.find(player => getPlayerId(player) === winnerId)?.name;
+
+    $("resultTitle").textContent = winnerName ? `${winnerName} WINS!` : "GAME OVER";
+    $("resultSubtitle").textContent = data?.message || "THE ARENA HAS SPOKEN";
+
+    const container = $("resultsList");
+    container.innerHTML = "";
+
+    const resultsPlayers = list.length ? list : players;
+
+    resultsPlayers.forEach((player, index) => {
+        const item = document.createElement("div");
+        item.className = "result-player";
+
+        if (getPlayerId(player) === winnerId || player.winner) {
+            item.classList.add("winner");
+        }
+
+        const name = document.createElement("span");
+        name.textContent = getPlayerNameFromData(player);
+
+        const detail = document.createElement("span");
+        detail.textContent = player.winner || getPlayerId(player) === winnerId ? "WINNER" : player.alive === false || player.eliminated ? "ELIMINATED" : "FINISHED";
+
+        item.append(name, detail);
+        container.appendChild(item);
+    });
+
+    showScreen("results");
+}
+
+showScreen("menu");

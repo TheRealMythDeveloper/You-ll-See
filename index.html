@@ -2,460 +2,170 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>FLAILING</title>
-<style>
-* {
-    box-sizing: border-box;
-}
-
-body {
-    margin: 0;
-    overflow: hidden;
-    background: #090b12;
-    font-family: Arial, sans-serif;
-    color: white;
-}
-
-canvas {
-    display: block;
-    width: 100vw;
-    height: 100vh;
-}
-
-#hud {
-    position: fixed;
-    top: 20px;
-    left: 0;
-    right: 0;
-    display: flex;
-    justify-content: space-between;
-    padding: 0 32px;
-    pointer-events: none;
-    font-weight: bold;
-    letter-spacing: 2px;
-}
-
-.playerHUD {
-    font-size: 14px;
-}
-
-#message {
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    text-align: center;
-    font-size: 38px;
-    font-weight: bold;
-    letter-spacing: 5px;
-    display: none;
-}
-
-#message small {
-    display: block;
-    font-size: 14px;
-    margin-top: 18px;
-    letter-spacing: 2px;
-    color: #aab1c5;
-}
-
-#controls {
-    position: fixed;
-    bottom: 18px;
-    width: 100%;
-    text-align: center;
-    color: #72798d;
-    font-size: 12px;
-    letter-spacing: 1px;
-}
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#080b14">
+    <title>FLAILING</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Orbitron:wght@400;600;700;800;900&display=swap" rel="stylesheet">
 </head>
 <body>
-
-<div id="hud">
-    <div class="playerHUD" style="color:#36e7ff">P1 · CYAN</div>
-    <div style="color:#9298aa">FLAILING v0.1</div>
-    <div class="playerHUD" style="color:#bf70ff">P2 · PURPLE (AI)</div>
-</div>
-
-<div id="message">
-    <span id="winner"></span>
-    <small>PRESS ENTER TO RESTART</small>
-</div>
-
-<div id="controls">
-    WASD TO MOVE · YOUR FLAIL FOLLOWS YOUR MOMENTUM
-</div>
-
-<canvas id="game"></canvas>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.20.0/matter.min.js"></script>
-
-<script>
-const { Engine, Bodies, Body, Constraint, Composite, Events } = Matter;
-
-const engine = Engine.create();
-engine.gravity.x = 0;
-engine.gravity.y = 0;
-
-const canvas = document.getElementById("game");
-const ctx = canvas.getContext("2d");
-
-const W = 1000;
-const H = 700;
-
-canvas.width = W;
-canvas.height = H;
-
-const keys = {};
-
-window.addEventListener("keydown", e => {
-    keys[e.key.toLowerCase()] = true;
-
-    if (e.key === "Enter" && gameOver) {
-        restart();
-    }
-});
-
-window.addEventListener("keyup", e => {
-    keys[e.key.toLowerCase()] = false;
-});
-
-const arena = {
-    x: 80,
-    y: 80,
-    w: W - 160,
-    h: H - 160
-};
-
-let players = [];
-let gameOver = false;
-let hitCooldown = new Map();
-
-function createPlayer(x, y, color, id) {
-    const group = Body.nextGroup(true);
-
-    const body = Bodies.circle(x, y, 17, {
-        label: "player" + id,
-        frictionAir: 0.035,
-        restitution: 0.7,
-        density: 0.003,
-        collisionFilter: { group }
-    });
-
-    const flail = Bodies.circle(x + 75, y, 13, {
-        label: "flail" + id,
-        density: 0.008,
-        frictionAir: 0.006,
-        restitution: 0.85,
-        collisionFilter: { group }
-    });
-
-    const chain = Constraint.create({
-        bodyA: body,
-        bodyB: flail,
-        length: 74,
-        stiffness: 0.025,
-        damping: 0.01
-    });
-
-    Composite.add(engine.world, [body, flail, chain]);
-
-    return {
-        body,
-        flail,
-        chain,
-        color,
-        id,
-        hp: 3,
-        alive: true,
-        isAI: id === 2
-    };
-}
-
-function restart() {
-    Composite.clear(engine.world, false);
-    players = [
-        createPlayer(340, 350, "#36e7ff", 1),
-        createPlayer(660, 350, "#bf70ff", 2)
-    ];
-
-    gameOver = false;
-    hitCooldown.clear();
-    document.getElementById("message").style.display = "none";
-}
-
-restart();
-
-// Arena drawing
-function drawArena() {
-    ctx.fillStyle = "#090b12";
-    ctx.fillRect(0, 0, W, H);
-
-    // Grid
-    ctx.strokeStyle = "#151c2c";
-    ctx.lineWidth = 1;
-
-    for (let x = arena.x; x <= arena.x + arena.w; x += 32) {
-        ctx.beginPath();
-        ctx.moveTo(x, arena.y);
-        ctx.lineTo(x, arena.y + arena.h);
-        ctx.stroke();
-    }
-
-    for (let y = arena.y; y <= arena.y + arena.h; y += 32) {
-        ctx.beginPath();
-        ctx.moveTo(arena.x, y);
-        ctx.lineTo(arena.x + arena.w, y);
-        ctx.stroke();
-    }
-
-    // Border
-    ctx.strokeStyle = "#35415d";
-    ctx.lineWidth = 3;
-    ctx.strokeRect(arena.x, arena.y, arena.w, arena.h);
-}
-
-// Draw chain
-function drawChain(player) {
-    const a = player.body.position;
-    const b = player.flail.position;
-
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-
-    const segments = 7;
-
-    ctx.save();
-    ctx.strokeStyle = player.color + "65";
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
-    ctx.stroke();
-
-    for (let i = 1; i < segments; i++) {
-        const t = i / segments;
-        const x = a.x + dx * t;
-        const y = a.y + dy * t;
-
-        ctx.beginPath();
-        ctx.arc(x, y, 3, 0, Math.PI * 2);
-        ctx.fillStyle = player.color;
-        ctx.fill();
-    }
-    ctx.restore();
-}
-
-function drawPlayer(player) {
-    if (!player.alive) return;
-
-    const p = player.body.position;
-    const f = player.flail.position;
-
-    // Player glow
-    ctx.shadowBlur = 24;
-    ctx.shadowColor = player.color;
-
-    // Chain
-    drawChain(player);
-
-    // Flail
-    ctx.beginPath();
-    ctx.arc(f.x, f.y, 13, 0, Math.PI * 2);
-    ctx.fillStyle = player.color;
-    ctx.fill();
-
-    ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    // Player
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 17, 0, Math.PI * 2);
-    ctx.fillStyle = player.color;
-    ctx.fill();
-
-    ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    // Direction indicator
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
-    ctx.fillStyle = "#ffffff";
-    ctx.fill();
-
-    ctx.shadowBlur = 0;
-}
-
-// Movement
-function movePlayer(player) {
-    if (!player.alive) return;
-
-    if (player.id === 1) {
-        let dx = 0;
-        let dy = 0;
-
-        if (keys["w"]) dy -= 1;
-        if (keys["s"]) dy += 1;
-        if (keys["a"]) dx -= 1;
-        if (keys["d"]) dx += 1;
-
-        if (dx !== 0 || dy !== 0) {
-            const len = Math.sqrt(dx * dx + dy * dy);
-            dx /= len;
-            dy /= len;
-
-            Body.applyForce(player.body, player.body.position, {
-                x: dx * 0.0018,
-                y: dy * 0.0018
-            });
-        }
-    } else {
-        // Simple AI
-        const target = players[0];
-        if (!target || !target.alive) return;
-
-        const dx = target.body.position.x - player.body.position.x;
-        const dy = target.body.position.y - player.body.position.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-
-        if (dist > 0) {
-            // Chase player, but periodically strafe
-            const strafe = Math.sin(Date.now() / 500) * 0.5;
-
-            Body.applyForce(player.body, player.body.position, {
-                x: (dx / dist + strafe * -dy / dist) * 0.0013,
-                y: (dy / dist + strafe * dx / dist) * 0.0013
-            });
-        }
-    }
-
-    // Speed limit
-    const v = player.body.velocity;
-    const speed = Math.sqrt(v.x * v.x + v.y * v.y);
-    const maxSpeed = 6.2;
-
-    if (speed > maxSpeed) {
-        Body.setVelocity(player.body, {
-            x: v.x / speed * maxSpeed,
-            y: v.y / speed * maxSpeed
-        });
-    }
-}
-
-// Flail hits
-Events.on(engine, "collisionStart", event => {
-    for (const pair of event.pairs) {
-        const a = pair.bodyA.label;
-        const b = pair.bodyB.label;
-
-        let flailId = null;
-        let targetId = null;
-
-        if (a.startsWith("flail") && b.startsWith("player")) {
-            flailId = Number(a.replace("flail", ""));
-            targetId = Number(b.replace("player", ""));
-        } else if (b.startsWith("flail") && a.startsWith("player")) {
-            flailId = Number(b.replace("flail", ""));
-            targetId = Number(a.replace("player", ""));
-        }
-
-        if (flailId === null || targetId === null || flailId === targetId) continue;
-
-        const attacker = players.find(p => p.id === flailId);
-        const target = players.find(p => p.id === targetId);
-
-        if (!attacker || !target || !target.alive || !attacker.alive) continue;
-
-        const cooldownKey = flailId + "-" + targetId;
-        const lastHit = hitCooldown.get(cooldownKey) || 0;
-
-        if (Date.now() - lastHit < 600) continue;
-
-        hitCooldown.set(cooldownKey, Date.now());
-
-        // Knockback direction from attacker flail to target
-        const dx = target.body.position.x - attacker.flail.position.x;
-        const dy = target.body.position.y - attacker.flail.position.y;
-        const len = Math.sqrt(dx * dx + dy * dy) || 1;
-
-        const impactSpeed = Math.sqrt(
-            attacker.flail.velocity.x ** 2 +
-            attacker.flail.velocity.y ** 2
-        );
-
-        const power = Math.min(0.035, 0.012 + impactSpeed * 0.005);
-
-        Body.applyForce(target.body, target.body.position, {
-            x: dx / len * power,
-            y: dy / len * power
-        });
-
-        target.hp--;
-
-        if (target.hp <= 0) {
-            eliminate(target);
-        }
-    }
-});
-
-function eliminate(player) {
-    player.alive = false;
-
-    Composite.remove(engine.world, player.body);
-    Composite.remove(engine.world, player.flail);
-    Composite.remove(engine.world, player.chain);
-
-    const remaining = players.filter(p => p.alive);
-
-    if (remaining.length <= 1) {
-        gameOver = true;
-
-        const winner = remaining[0];
-
-        document.getElementById("winner").textContent =
-            winner ? (winner.id === 1 ? "CYAN WINS!" : "PURPLE WINS!") : "DRAW!";
-
-        document.getElementById("message").style.display = "block";
-    }
-}
-
-// UI health display
-function drawHealth() {
-    players.forEach(p => {
-        const x = p.id === 1 ? 32 : W - 132;
-        const y = 48;
-
-        for (let i = 0; i < 3; i++) {
-            ctx.fillStyle = i < p.hp ? p.color : "#242b3b";
-            ctx.fillRect(x + i * 28, y, 20, 8);
-        }
-    });
-}
-
-// Main loop
-function loop() {
-    if (!gameOver) {
-        movePlayer(players[0]);
-        movePlayer(players[1]);
-        Engine.update(engine, 1000 / 60);
-    }
-
-    drawArena();
-    players.forEach(drawPlayer);
-    drawHealth();
-
-    requestAnimationFrame(loop);
-}
-
-loop();
-</script>
+    <canvas id="game"></canvas>
+
+    <div class="screen-layer">
+        <section id="menu" class="screen">
+            <div class="brand">
+                <div class="brand-mark">
+                    <span></span>
+                    <span></span>
+                </div>
+                <div class="brand-name">FLAILING<span>.</span></div>
+            </div>
+
+            <div class="menu-content">
+                <div class="eyebrow"><span class="pulse-dot"></span> MULTIPLAYER CHAOS</div>
+                <h1>SWING.<br><span>SMASH.</span><br>SURVIVE.</h1>
+                <p class="subtitle">Momentum is everything. Friends are targets.</p>
+
+                <div class="menu-card">
+                    <div class="name-field">
+                        <label for="playerName">YOUR NAME</label>
+                        <input id="playerName" type="text" maxlength="16" placeholder="Enter your name" autocomplete="off">
+                    </div>
+
+                    <button id="createButton" class="primary-button">
+                        <span>CREATE ARENA</span>
+                        <span class="button-arrow">↗</span>
+                    </button>
+
+                    <div class="divider"><span>OR JOIN A FIGHT</span></div>
+
+                    <div class="join-row">
+                        <input id="roomCodeInput" type="text" maxlength="4" placeholder="ROOM CODE" autocomplete="off">
+                        <button id="joinButton" class="secondary-button">JOIN <span>→</span></button>
+                    </div>
+
+                    <div id="menuStatus" class="status-message"></div>
+                </div>
+
+                <div class="controls-hint">
+                    <div class="key-group">
+                        <div class="key">W</div>
+                        <div class="key-row">
+                            <div class="key">A</div>
+                            <div class="key">S</div>
+                            <div class="key">D</div>
+                        </div>
+                    </div>
+                    <span>MOVE</span>
+                    <span class="hint-divider"></span>
+                    <span>YOUR FLAIL MOVES WITH MOMENTUM</span>
+                </div>
+            </div>
+
+            <div class="menu-footer">
+                <span>MYTHOS STUDIOS</span>
+                <span>BUILT FOR CHAOS</span>
+            </div>
+        </section>
+
+        <section id="lobby" class="screen hidden">
+            <div class="lobby-topbar">
+                <div class="brand-name small">FLAILING<span>.</span></div>
+                <div class="connection-indicator"><span class="pulse-dot"></span> CONNECTED</div>
+            </div>
+
+            <div class="lobby-content">
+                <div class="eyebrow">WAITING FOR MAYHEM</div>
+                <h2>THE <span>LOBBY</span></h2>
+
+                <div class="room-code-panel">
+                    <div class="room-code-label">ROOM CODE</div>
+                    <div class="room-code-display">
+                        <span id="roomCodeDisplay">----</span>
+                        <button id="copyCodeButton" class="copy-button" title="Copy room code">COPY</button>
+                    </div>
+                    <div class="room-code-caption">Share this code with your friends</div>
+                </div>
+
+                <div class="lobby-grid">
+                    <div class="players-panel">
+                        <div class="panel-heading">
+                            <span>FIGHTERS</span>
+                            <span id="playerCount">0 / 5</span>
+                        </div>
+                        <div id="playerList" class="player-list"></div>
+                    </div>
+
+                    <div class="settings-panel">
+                        <div class="panel-heading">ARENA SETTINGS</div>
+                        <label for="arenaSizeSelect">ARENA SIZE</label>
+                        <select id="arenaSizeSelect">
+                            <option value="large">LARGE</option>
+                            <option value="medium" selected>MEDIUM</option>
+                            <option value="small">SMALL</option>
+                        </select>
+                        <div class="setting-description">Smaller arenas mean faster eliminations.</div>
+
+                        <div class="lobby-tip">
+                            <span class="tip-icon">✳</span>
+                            <div>
+                                <strong>TIP</strong>
+                                <p>Keep moving. Your flail gets stronger with momentum.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="lobby-actions">
+                    <button id="readyButton" class="secondary-button ready-button">READY UP</button>
+                    <button id="startButton" class="primary-button start-button">START MATCH <span>↗</span></button>
+                    <button id="leaveButton" class="text-button">LEAVE LOBBY</button>
+                </div>
+
+                <div id="lobbyStatus" class="status-message"></div>
+            </div>
+        </section>
+
+        <section id="results" class="screen hidden">
+            <div class="results-content">
+                <div class="eyebrow"><span class="pulse-dot"></span> MATCH COMPLETE</div>
+                <h1 id="resultTitle">VICTORY</h1>
+                <p id="resultSubtitle">The arena belongs to you.</p>
+
+                <div class="results-panel">
+                    <div class="panel-heading">MATCH RESULTS</div>
+                    <div id="resultsList" class="results-list"></div>
+                </div>
+
+                <div class="results-actions">
+                    <button id="rematchButton" class="primary-button">REMATCH <span>↗</span></button>
+                    <button id="resultsLeaveButton" class="secondary-button">RETURN TO MENU</button>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <div id="gameHud" class="game-hud hidden">
+        <div class="hud-top">
+            <div class="hud-logo">FLAILING<span>.</span></div>
+            <div class="hud-alive"><span class="pulse-dot"></span><span id="aliveCount">5</span> REMAINING</div>
+            <div id="phaseLabel" class="hud-phase">ARENA STABLE</div>
+        </div>
+
+        <div id="gamePlayerStats" class="game-player-stats"></div>
+
+        <div class="hud-bottom">
+            <div class="hud-controls">W A S D <span>MOVE</span></div>
+            <button id="gameLeaveButton" class="hud-leave-button">LEAVE MATCH</button>
+        </div>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="game.js"></script>
 </body>
 </html>
-
-
-
