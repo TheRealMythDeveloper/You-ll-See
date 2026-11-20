@@ -77,7 +77,7 @@ function toast(message) {
 
     element.textContent = message;
     element.classList.add("show");
-
+ 
     clearTimeout(toastTimeout);
     toastTimeout = setTimeout(() => element.classList.remove("show"), 2600);
 }

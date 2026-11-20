@@ -1,7 +1,7 @@
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
-/*initializes*/
+/*initializes..   DONT FORGET THIS EVER.*/
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
@@ -17,7 +17,7 @@ const socketRooms = new Map();
 const COLORS = ["#39e8ff", "#ff4f77", "#c26cff", "#ffce52", "#6dff9d"];
 
 const ARENA_SIZES = {
-    small: 390,
+    small: 390, 
     medium: 490,
     large: 590
 };
@@ -58,6 +58,8 @@ function newFlailPlayer(socket, name) {
         vy: 0,
         angle: random(0, Math.PI * 2),
         angularVelocity: 0,
+        lastInputAngle: null,
+        spinInput: 0,
         maceX: 0,
         maceY: 0,
         maceVx: 0,
@@ -239,8 +241,10 @@ function startFlailing(room, socket) {
         player.x = Math.cos(angle) * startRadius;
         player.y = Math.sin(angle) * startRadius;
         player.angle = random(0, Math.PI * 2);
-        player.angularVelocity = random(-1, 1);
-        player.chainLength = 82;
+        player.angularVelocity = random(-0.4, 0.4);
+        player.lastInputAngle = null;
+        player.spinInput = 0;
+        player.chainLength = 90;
         player.maceX = player.x + Math.cos(player.angle) * player.chainLength;
         player.maceY = player.y + Math.sin(player.angle) * player.chainLength;
         player.maceVx = -Math.sin(player.angle) * player.angularVelocity * player.chainLength;
@@ -396,51 +400,48 @@ function updateFlailingPhysics(room, dt) {
         const playerAx = (player.vx - previousVx) / dt;
         const playerAy = (player.vy - previousVy) / dt;
 
-        const chainDx = player.maceX - player.x;
-        const chainDy = player.maceY - player.y;
-        const chainDistance = Math.hypot(chainDx, chainDy) || player.chainLength;
-        const chainAngle = Math.atan2(chainDy, chainDx);
+        // turning should add energy? Centrifugal. Hopefully.
+        if (dx !== 0 || dy !== 0) {
+            const inputAngle = Math.atan2(dy, dx);
 
-        const tangentX = -Math.sin(chainAngle);
-        const tangentY = Math.cos(chainAngle);
-        const tangentialAcceleration = (playerAx * tangentX + playerAy * tangentY) * 0.72;
+            if (player.lastInputAngle !== null) {
+                let change = inputAngle - player.lastInputAngle;
 
-        player.maceVx += playerAx * 0.58 * dt;
-        player.maceVy += playerAy * 0.58 * dt;
+                while (change > Math.PI) change -= Math.PI * 2;
+                while (change < -Math.PI) change += Math.PI * 2;
 
-        const pull = Math.max(0, chainDistance - player.chainLength) * 24;
-        player.maceVx -= Math.cos(chainAngle) * pull * dt;
-        player.maceVy -= Math.sin(chainAngle) * pull * dt;
-
-        player.maceVx += tangentX * tangentialAcceleration * dt;
-        player.maceVy += tangentY * tangentialAcceleration * dt;
-
-        player.maceVx *= Math.pow(0.992, dt * 30);
-        player.maceVy *= Math.pow(0.992, dt * 30);
-
-        player.maceX += player.maceVx * dt;
-        player.maceY += player.maceVy * dt;
-
-        const ropeX = player.maceX - player.x;
-        const ropeY = player.maceY - player.y;
-        const ropeDistance = Math.hypot(ropeX, ropeY) || 1;
-
-        if (ropeDistance > player.chainLength) {
-            const nx = ropeX / ropeDistance;
-            const ny = ropeY / ropeDistance;
-
-            player.maceX = player.x + nx * player.chainLength;
-            player.maceY = player.y + ny * player.chainLength;
-
-            const outwardSpeed = player.maceVx * nx + player.maceVy * ny;
-            if (outwardSpeed > 0) {
-                player.maceVx -= nx * outwardSpeed;
-                player.maceVy -= ny * outwardSpeed;
+                player.spinInput = clamp(change / dt, -5, 5);
+            } else {
+                player.spinInput = 0;
             }
+
+            player.lastInputAngle = inputAngle;
+        } else {
+            player.spinInput *= Math.pow(0.92, dt * 30);
         }
 
-        player.angle = Math.atan2(player.maceY - player.y, player.maceX - player.x);
-        player.angularVelocity = (player.maceVx * -Math.sin(player.angle) + player.maceVy * Math.cos(player.angle)) / player.chainLength;
+        const tangentX = -Math.sin(player.angle);
+        const tangentY = Math.cos(player.angle);
+
+        //Player movement SHOULD add momentum.
+        const tangentialAcceleration = playerAx * tangentX + playerAy * tangentY;
+
+        player.angularVelocity += (tangentialAcceleration / player.chainLength) * 0.32 * dt;
+        player.angularVelocity += player.spinInput * 0.85 * dt;
+
+        // Ice physics..
+        player.angularVelocity *= Math.pow(0.997, dt * 30);
+        player.angularVelocity = clamp(player.angularVelocity, -12, 12);
+
+        player.angle += player.angularVelocity * dt;
+
+        // Hopefully this will pin it so tht I dont have to worry about area issues.
+        player.maceX = player.x + Math.cos(player.angle) * player.chainLength;
+        player.maceY = player.y + Math.sin(player.angle) * player.chainLength;
+
+        // Velocity should include the player as well.
+        player.maceVx = player.vx - Math.sin(player.angle) * player.angularVelocity * player.chainLength;
+        player.maceVy = player.vy + Math.cos(player.angle) * player.angularVelocity * player.chainLength;
     }
 
     const alive = room.players.filter(player => player.alive);
@@ -489,16 +490,16 @@ function updateFlailingPhysics(room, dt) {
         ) {
             eliminateFlailingPlayer(room, player, "arena");
         }
-    }
-
+    } 
+ 
     checkFlailingWinner(room);
     if (room.state !== "PLAYING") return;
 
     io.to(room.code).emit("game:tick", runningGameState(room));
-}
+} 
 
 io.on("connection", socket => {
-    socket.emit("connection:ready", { id: socket.id });
+    socket.emit("connection:ready", { id: socket.id }); 
 
     socket.on("room:create", (data = {}) => {
         if (socketRooms.has(socket.id)) removeFlailingPlayer(socket);
@@ -582,7 +583,7 @@ io.on("connection", socket => {
             left: Boolean(data?.left),
             right: Boolean(data?.right)
         };
-    });
+    }); 
 
     socket.on("game:rematch", () => {
         const room = roomForFlailing(socket);
