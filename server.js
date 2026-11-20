@@ -1,7 +1,7 @@
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
-
+/*initializes*/
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
@@ -43,6 +43,7 @@ function flailingRoomCode() {
     return code;
 }
 
+/*The player may need some fixing.*/
 function newFlailPlayer(socket, name) {
     return {
         id: socket.id,
@@ -51,14 +52,17 @@ function newFlailPlayer(socket, name) {
         ready: false,
         alive: true,
         hp: 3,
-    x: 0,
+        x: 0,
         y: 0,
         vx: 0,
         vy: 0,
         angle: random(0, Math.PI * 2),
-        angularVelocity: random(-1.5, 1.5),
+        angularVelocity: 0,
         maceX: 0,
         maceY: 0,
+        maceVx: 0,
+        maceVy: 0,
+        chainLength: 82,
         input: { up: false, down: false, left: false, right: false },
         kills: 0,
         invulnerable: 0,
@@ -158,14 +162,14 @@ function removeFlailingPlayer(socket) {
         if (room.players.filter(player => player.alive).length <= 1) {
             finishFlailing(room);
         } else {
-            io.to(code).emit("game:tick", flailingGameState(room));
+            io.to(code).emit("game:tick", runningGameState(room));
         }
     } else {
         updateFlailingLobby(room);
     }
 }
 
-function flailingGameState(room) {
+function runningGameState(room) {
     const elapsed = (Date.now() - room.gameStartedAt) / 1000;
 
     return {
@@ -185,6 +189,9 @@ function flailingGameState(room) {
             angularVelocity: player.angularVelocity,
             maceX: player.maceX,
             maceY: player.maceY,
+            maceVx: player.maceVx,
+            maceVy: player.maceVy,
+            chainLength: player.chainLength,
             alive: player.alive,
             hp: player.hp,
             invulnerable: player.invulnerable,
@@ -232,9 +239,12 @@ function startFlailing(room, socket) {
         player.x = Math.cos(angle) * startRadius;
         player.y = Math.sin(angle) * startRadius;
         player.angle = random(0, Math.PI * 2);
-        player.angularVelocity = random(-2.5, 2.5);
-        player.maceX = player.x + Math.cos(player.angle) * 82;
-        player.maceY = player.y + Math.sin(player.angle) * 82;
+        player.angularVelocity = random(-1, 1);
+        player.chainLength = 82;
+        player.maceX = player.x + Math.cos(player.angle) * player.chainLength;
+        player.maceY = player.y + Math.sin(player.angle) * player.chainLength;
+        player.maceVx = -Math.sin(player.angle) * player.angularVelocity * player.chainLength;
+        player.maceVy = Math.cos(player.angle) * player.angularVelocity * player.chainLength;
     });
 
     io.to(room.code).emit("game:start", flailingLobbyData(room));
@@ -311,7 +321,7 @@ function damageFlailingPlayer(room, target, attacker, knockX, knockY) {
 }
 
 function flailVelocity(player) {
-    return Math.hypot(player.vx, player.vy) + Math.abs(player.angularVelocity) * 18;
+    return Math.hypot(player.maceVx, player.maceVy);
 }
 
 function tryFlailingHit(room, attacker, target, now) {
@@ -361,9 +371,12 @@ function updateFlailingPhysics(room, dt) {
         if (player.input.up) dy--;
         if (player.input.down) dy++;
 
-        const length = Math.hypot(dx, dy) || 1;
-        dx /= length;
-        dy /= length;
+        const inputLength = Math.hypot(dx, dy) || 1;
+        dx /= inputLength;
+        dy /= inputLength;
+
+        const previousVx = player.vx;
+        const previousVy = player.vy;
 
         player.vx += dx * 470 * dt;
         player.vy += dy * 470 * dt;
@@ -372,23 +385,62 @@ function updateFlailingPhysics(room, dt) {
         player.vy *= Math.pow(0.90, dt * 30);
 
         const speed = Math.hypot(player.vx, player.vy);
-        const maxSpeed = 310;
-
-        if (speed > maxSpeed) {
-            player.vx = player.vx / speed * maxSpeed;
-            player.vy = player.vy / speed * maxSpeed;
+        if (speed > 310) {
+            player.vx = player.vx / speed * 310;
+            player.vy = player.vy / speed * 310;
         }
 
         player.x += player.vx * dt;
         player.y += player.vy * dt;
 
-        player.angularVelocity += (dx * 0.8 - dy * 0.6) * dt;
-        player.angularVelocity *= Math.pow(0.995, dt * 30);
-        player.angularVelocity = clamp(player.angularVelocity, -10, 10);
-        player.angle += player.angularVelocity * dt;
+        const playerAx = (player.vx - previousVx) / dt;
+        const playerAy = (player.vy - previousVy) / dt;
 
-        player.maceX = player.x + Math.cos(player.angle) * 82;
-        player.maceY = player.y + Math.sin(player.angle) * 82;
+        const chainDx = player.maceX - player.x;
+        const chainDy = player.maceY - player.y;
+        const chainDistance = Math.hypot(chainDx, chainDy) || player.chainLength;
+        const chainAngle = Math.atan2(chainDy, chainDx);
+
+        const tangentX = -Math.sin(chainAngle);
+        const tangentY = Math.cos(chainAngle);
+        const tangentialAcceleration = (playerAx * tangentX + playerAy * tangentY) * 0.72;
+
+        player.maceVx += playerAx * 0.58 * dt;
+        player.maceVy += playerAy * 0.58 * dt;
+
+        const pull = Math.max(0, chainDistance - player.chainLength) * 24;
+        player.maceVx -= Math.cos(chainAngle) * pull * dt;
+        player.maceVy -= Math.sin(chainAngle) * pull * dt;
+
+        player.maceVx += tangentX * tangentialAcceleration * dt;
+        player.maceVy += tangentY * tangentialAcceleration * dt;
+
+        player.maceVx *= Math.pow(0.992, dt * 30);
+        player.maceVy *= Math.pow(0.992, dt * 30);
+
+        player.maceX += player.maceVx * dt;
+        player.maceY += player.maceVy * dt;
+
+        const ropeX = player.maceX - player.x;
+        const ropeY = player.maceY - player.y;
+        const ropeDistance = Math.hypot(ropeX, ropeY) || 1;
+
+        if (ropeDistance > player.chainLength) {
+            const nx = ropeX / ropeDistance;
+            const ny = ropeY / ropeDistance;
+
+            player.maceX = player.x + nx * player.chainLength;
+            player.maceY = player.y + ny * player.chainLength;
+
+            const outwardSpeed = player.maceVx * nx + player.maceVy * ny;
+            if (outwardSpeed > 0) {
+                player.maceVx -= nx * outwardSpeed;
+                player.maceVy -= ny * outwardSpeed;
+            }
+        }
+
+        player.angle = Math.atan2(player.maceY - player.y, player.maceX - player.x);
+        player.angularVelocity = (player.maceVx * -Math.sin(player.angle) + player.maceVy * Math.cos(player.angle)) / player.chainLength;
     }
 
     const alive = room.players.filter(player => player.alive);
@@ -400,7 +452,7 @@ function updateFlailingPhysics(room, dt) {
         for (let j = i + 1; j < alive.length; j++) {
             const b = alive[j];
 
-            const bodyDistance = Math.hypot(a.x - b.x);
+            const bodyDistance = Math.hypot(a.x - b.x, a.y - b.y);
             const bodyMinimum = 34;
 
             if (bodyDistance < bodyMinimum && bodyDistance > 0) {
@@ -442,7 +494,7 @@ function updateFlailingPhysics(room, dt) {
     checkFlailingWinner(room);
     if (room.state !== "PLAYING") return;
 
-    io.to(room.code).emit("game:tick", flailingGameState(room));
+    io.to(room.code).emit("game:tick", runningGameState(room));
 }
 
 io.on("connection", socket => {
@@ -568,7 +620,7 @@ setInterval(() => {
 app.get("/health", (req, res) => {
     res.json({
         status: "ok",
-        rooms: rooms.size, 
+        rooms: rooms.size,
         players: socketRooms.size
     });
 });

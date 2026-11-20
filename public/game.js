@@ -4,20 +4,20 @@ const $ = id => document.getElementById(id);
 
 const screens = {
     menu: $("menu"),
-    lobby: $("lobby"),
+    lobby: $("lobby"), 
     results: $("results"),
     hud: $("gameHud")
-};
+}; 
 
 const canvas = $("game");
 const ctx = canvas.getContext("2d");
-
+ 
 let currentScreen = "menu";
 let isHost = false;
-let isReady = false;
+let isReady = false; 
 let gameRunning = false;
 let localPlayerId = null;
-let currentRoom = null;
+let currentRoom = null; 
 let latestState = null;
 let players = [];
 let arenaRadius = 700;
