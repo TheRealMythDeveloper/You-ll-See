@@ -46,6 +46,7 @@ function flailingRoomCode() {
 /*The player may need some fixing.*/
 function newFlailPlayer(socket, name) {
     return {
+        hitLockUntil: 0,
         id: socket.id,
         name: String(name || "Player").trim().slice(0, 16) || "Player",
         color: COLORS[0],
@@ -375,6 +376,7 @@ function tryFlailingHit(room, attacker, target, now) {
         launchY * launchForce
     );
 }
+
 function updateFlailingPhysics(room, dt) {
     if (room.state !== "PLAYING") return;
 
@@ -421,21 +423,29 @@ function updateFlailingPhysics(room, dt) {
         const playerAx = (player.vx - previousVx) / dt;
         const playerAy = (player.vy - previousVy) / dt;
 
-        // The moving player transfers a little energy now
-        player.maceVx += playerAx * 0.28 * dt;
-        player.maceVy += playerAy * 0.28 * dt;
+        // Movement transfers more energy now
+        player.maceVx += playerAx * 0.85 * dt;
+        player.maceVy += playerAy * 0.85 * dt;
 
-        // The mace has its own momentum now!
-        player.maceVx *= Math.pow(0.999, dt * 30);
-        player.maceVy *= Math.pow(0.999, dt * 30);
+        const spin = (player.input.right ? 1 : 0) - (player.input.left ? 1 : 0);
+
+        const ropeX = player.maceX - player.x;
+        const ropeY = player.maceY - player.y;
+        const ropeDistance = Math.hypot(ropeX, ropeY) || 1;
+
+        const tangentX = -ropeY / ropeDistance;
+        const tangentY = ropeX / ropeDistance;
+
+        player.maceVx += tangentX * spin * 950 * dt;
+        player.maceVy += tangentY * spin * 950 * dt;
+
+        // Keep momentum when releasing input.
+        player.maceVx *= Math.pow(0.997, dt * 30);
+        player.maceVy *= Math.pow(0.997, dt * 30);
 
         player.maceX += player.maceVx * dt;
         player.maceY += player.maceVy * dt;
 
-        // Rope should be stress testable.
-        const ropeX = player.maceX - player.x;
-        const ropeY = player.maceY - player.y;
-        const ropeDistance = Math.hypot(ropeX, ropeY);
 
         if (ropeDistance > player.chainLength) {
             const nx = ropeX / ropeDistance;
@@ -502,22 +512,75 @@ function updateFlailingPhysics(room, dt) {
             tryFlailingHit(room, b, a, now);
         }
     }
+// Mace-to-mace collisions workout
+for (let i = 0; i < alive.length; i++) {
+    const a = alive[i];
 
-    // Arena stays fixed now, hopefully.
-    for (const player of room.players) {
-        if (!player.alive) continue;
+    for (let j = i + 1; j < alive.length; j++) {
+        const b = alive[j];
 
-        const margin = 40;
+        const dx = b.maceX - a.maceX;
+        const dy = b.maceY - a.maceY;
+        const distance = Math.hypot(dx, dy) || 0.001;
+        const minimum = 58;
 
-        if (
-            player.x < room.arena.x - margin ||
-            player.x > room.arena.x + room.arena.w + margin ||
-            player.y < room.arena.y - margin ||
-            player.y > room.arena.y + room.arena.h + margin
-        ) {
-            eliminateFlailingPlayer(room, player, "arena");
+        if (distance >= minimum) continue;
+
+        const nx = dx / distance;
+        const ny = dy / distance;
+        const overlap = minimum - distance;
+
+        // Separate the balls
+        a.maceX -= nx * overlap * 0.5;
+        a.maceY -= ny * overlap * 0.5;
+        b.maceX += nx * overlap * 0.5;
+        b.maceY += ny * overlap * 0.5;
+
+        const relativeVelocity =
+            (b.maceVx - a.maceVx) * nx +
+            (b.maceVy - a.maceVy) * ny;
+
+        if (relativeVelocity < 0) {
+            const impulse = -relativeVelocity * 0.8;
+
+            a.maceVx -= nx * impulse;
+            a.maceVy -= ny * impulse;
+            b.maceVx += nx * impulse;
+            b.maceVy += ny * impulse;
         }
     }
+}
+    // Arena stays fixed now, hopefully.
+    // Arena stays ON SCREEN now hopefully.
+const wallPadding = 12;
+const left = room.arena.x + wallPadding;
+const right = room.arena.x + room.arena.w - wallPadding;
+const top = room.arena.y + wallPadding;
+const bottom = room.arena.y + room.arena.h - wallPadding;
+
+for (const player of room.players) {
+    if (!player.alive) continue;
+
+    if (player.x < left) {
+        player.x = left;
+        if (player.vx < 0) player.vx *= -0.65;
+    }
+
+    if (player.x > right) {
+        player.x = right;
+        if (player.vx > 0) player.vx *= -0.65;
+    }
+
+    if (player.y < top) {
+        player.y = top;
+        if (player.vy < 0) player.vy *= -0.65;
+    }
+
+    if (player.y > bottom) {
+        player.y = bottom;
+        if (player.vy > 0) player.vy *= -0.65;
+    }
+}
 
     checkFlailingWinner(room);
     if (room.state !== "PLAYING") return;
@@ -559,7 +622,6 @@ io.on("connection", socket => {
 
         const player = newFlailPlayer(socket, data.name);
         player.color = COLORS[room.players.length % COLORS.length];
-        hitLockUntil: 0,
         room.players.push(player);
         socketRooms.set(socket.id, code);
         socket.join(code);

@@ -16,13 +16,13 @@ let currentScreen = "menu";
 let isHost = false;
 let isReady = false; 
 let gameRunning = false;
-let localPlayerId = null;
+let localPlayerId = null; 
 let currentRoom = null; 
 let latestState = null;
-let players = [];
-let arenaRadius = 700;
+let players = [];  
+let arenaBounds = { x: -367.5, y: -245, w: 735, h: 490 };
 let arenaCenter = { x: 0, y: 0 };
-let camera = { x: 0, y: 0 };
+let camera = { x: 0, y: 0, zoom: 1 }; 
 let lastToast = null;
 let toastTimeout = null;
 let input = { up: false, down: false, left: false, right: false };
@@ -403,18 +403,32 @@ function getPosition(object, keys, fallback = null) {
     }
     return fallback;
 }
-
 function normalizeGameState(data) {
     const state = data?.state || data?.game || data || {};
     const list = normalizePlayers(state);
+
     if (list.length) players = list;
 
     const arena = state.arena || data?.arena || {};
-    arenaRadius = getNumber(arena, ["radius", "size", "currentRadius"], getNumber(state, ["arenaRadius", "radius"], arenaRadius));
-    arenaCenter = getPosition(arena, ["center", "position"], {
-        x: getNumber(arena, ["x", "centerX"], 0),
-        y: getNumber(arena, ["y", "centerY"], 0)
-    });
+
+    if (
+        Number.isFinite(arena.x) &&
+        Number.isFinite(arena.y) &&
+        Number.isFinite(arena.w) &&
+        Number.isFinite(arena.h)
+    ) {
+        arenaBounds = {
+            x: arena.x,
+            y: arena.y,
+            w: arena.w,
+            h: arena.h
+        };
+    }
+
+    arenaCenter = {
+        x: arenaBounds.x + arenaBounds.w / 2,
+        y: arenaBounds.y + arenaBounds.h / 2
+    };
 
     latestState = state;
     return state;
@@ -444,16 +458,18 @@ function getFlailPosition(player) {
         x: pos.x + Math.cos(angle) * length,
         y: pos.y + Math.sin(angle) * length
     };
-}
+} 
 
 function getAlive(player) {
     return player?.alive !== false && player?.eliminated !== true && player?.dead !== true;
 }
 
 function worldToScreen(x, y) {
+    const zoom = camera.zoom || 1;
+
     return {
-        x: x - camera.x + window.innerWidth / 2,
-        y: y - camera.y + window.innerHeight / 2
+        x: (x - camera.x) * zoom + window.innerWidth / 2,
+        y: (y - camera.y) * zoom + window.innerHeight / 2
     };
 }
 
@@ -490,80 +506,74 @@ function drawBackground() {
     ctx.fillStyle = glow;
     ctx.fillRect(0, 0, width, height);
 }
-
 function drawArena() {
-    const center = worldToScreen(arenaCenter.x, arenaCenter.y);
-    const radius = Math.max(50, arenaRadius);
+    const topLeft = worldToScreen(arenaBounds.x, arenaBounds.y);
+    const width = arenaBounds.w * camera.zoom;
+    const height = arenaBounds.h * camera.zoom;
 
     ctx.save();
 
-    ctx.beginPath();
-    ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(18,24,38,0.65)";
-    ctx.fill();
+    ctx.fillStyle = "rgba(18,24,38,0.72)";
+    ctx.fillRect(topLeft.x, topLeft.y, width, height);
 
-    ctx.beginPath();
-    ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
-    ctx.strokeStyle = "rgba(168,85,247,0.65)";
     ctx.lineWidth = 4;
+    ctx.strokeStyle = "#a855f7";
     ctx.shadowColor = "#a855f7";
-    ctx.shadowBlur = 18;
-    ctx.stroke();
-    ctx.shadowBlur = 0;
+    ctx.shadowBlur = 16;
+    ctx.strokeRect(topLeft.x, topLeft.y, width, height);
 
-    ctx.beginPath();
-    ctx.arc(center.x, center.y, radius - 12, 0, Math.PI * 2);
-    ctx.strokeStyle = "rgba(129,140,248,0.18)";
+    ctx.shadowBlur = 0;
     ctx.lineWidth = 1;
     ctx.setLineDash([8, 12]);
-    ctx.stroke();
+    ctx.strokeStyle = "rgba(129,140,248,0.25)";
+    ctx.strokeRect(
+        topLeft.x + 12,
+        topLeft.y + 12,
+        width - 24,
+        height - 24
+    );
     ctx.setLineDash([]);
 
     ctx.restore();
 }
-
-function drawChain(start, end, color) {
+function drawChain(start, end, color, chainLength = 90) {
     const dx = end.x - start.x;
     const dy = end.y - start.y;
     const distance = Math.hypot(dx, dy);
-    const slack = Math.max(0, 90 - distance);
 
-    // Rope droops when it has slack.
-    const sag = Math.min(slack * 0.8, 65);
-
-    ctx.save();
-    ctx.lineCap = "round";
-    ctx.lineLineJoin = "round";
+    const slack = Math.max(0, chainLength - distance);
+    const sag = Math.min(slack * 0.55, 45);
 
     const midX = (start.x + end.x) / 2;
     const midY = (start.y + end.y) / 2 + sag;
 
+    ctx.save();
+    ctx.lineCap = "round";
+
     ctx.beginPath();
     ctx.moveTo(start.x, start.y);
     ctx.quadraticCurveTo(midX, midY, end.x, end.y);
-    ctx.strokeStyle = "rgba(210,220,235,0.75)";
+    ctx.strokeStyle = "#b8c2d4";
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    // Small rope links following the curve.
-    const links = Math.floor(distance / 13);
+    const links = Math.floor(distance / 12);
 
     for (let i = 1; i < links; i++) {
         const t = i / links;
-        const one = 1 - t;
+        const inv = 1 - t;
 
-        const x = one * one * start.x
-            + 2 * one * t * midX
+        const x = inv * inv * start.x
+            + 2 * inv * t * midX
             + t * t * end.x;
 
-        const y = one * one * start.y
-            + 2 * one * t * midY
+        const y = inv * inv * start.y
+            + 2 * inv * t * midY
             + t * t * end.y;
 
         ctx.beginPath();
-        ctx.arc(x, y, 1.5, 0, Math.PI * 2);
+        ctx.arc(x, y, 1.4, 0, Math.PI * 2);
         ctx.fillStyle = color;
-        ctx.globalAlpha = 0.7;
         ctx.fill();
     }
 
@@ -628,7 +638,7 @@ function drawPlayer(player, index) {
     const maceRadius = 29;
 
     // Rope first, behind both objects
-    drawChain(pos, flail, color);
+    drawChain(pos, flail, color, getNumber(player, ["chainLength"], 90) * camera.zoom);
 
     // Mace
     drawFlail(flail, color, maceRadius);
@@ -673,13 +683,18 @@ function drawGame() {
     const myPlayer = players.find(player => getPlayerId(player) === localPlayerId);
     const myPosition = myPlayer ? getPlayerPosition(myPlayer) : arenaCenter;
 
-    camera.x = myPosition.x;
+     camera.x = myPosition.x;
     camera.y = myPosition.y;
+
+     const fitX = (window.innerWidth - 100) / arenaBounds.w;
+    const fitY = (window.innerHeight - 160) / arenaBounds.h;
+
+    camera.zoom = Math.max(0.45, Math.min(1, fitX, fitY));
 
     drawBackground();
     drawArena();
 
-    players.forEach(drawPlayer);
+    players.forEach(drawPlayer); 
     drawParticles();
 
     const aliveElement = $("aliveCount");
