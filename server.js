@@ -6,12 +6,12 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-app.use(express.static("public"));
+app.use(express.static("public")); 
 
 const PORT = process.env.PORT || 3000;
 const MAX_PLAYERS = 5;
-const TICK_RATE = 30;
-const rooms = new Map();
+const TICK_RATE = 30; 
+const rooms = new Map(); 
 const socketRooms = new Map();
 
 const COLORS = ["#39e8ff", "#ff4f77", "#c26cff", "#ffce52", "#6dff9d"];
@@ -227,7 +227,7 @@ function startFlailing(room, socket) {
 
     room.players.forEach((player, index) => {
         const angle = Math.PI * 2 * index / room.players.length;
-
+        player.hitLockUntil = 0;
         player.color = COLORS[index % COLORS.length];
         player.alive = true;
         player.hp = 3;
@@ -327,40 +327,58 @@ function damageFlailingPlayer(room, target, attacker, knockX, knockY) {
 function flailVelocity(player) {
     return Math.hypot(player.maceVx, player.maceVy);
 }
-
 function tryFlailingHit(room, attacker, target, now) {
     if (!attacker.alive || !target.alive) return;
-
     if ((attacker.hitCooldowns[target.id] || 0) > now) return;
 
-    const distance = Math.hypot(attacker.maceX - target.x, attacker.maceY - target.y);
-    if (distance > 29) return;
+    const dx = target.x - attacker.maceX;
+    const dy = target.y - attacker.maceY;
+    const distance = Math.hypot(dx, dy);
+
+    // radius.. um.. 
+    if (distance > 34) return;
 
     const speed = flailVelocity(attacker);
-    if (speed < 115) return;
+    if (speed < 100) return;
 
-    const nx = (target.x - attacker.maceX) / (distance || 1);
-    const ny = (target.y - attacker.maceY) / (distance || 1);
+    // launching should work now
+    let launchX = attacker.maceVx;
+    let launchY = attacker.maceVy;
+    const launchSpeed = Math.hypot(launchX, launchY) || 1;
+
+    launchX /= launchSpeed;
+    launchY /= launchSpeed;
+
+    
+    const contactX = dx / (distance || 1);
+    const contactY = dy / (distance || 1);
+
+    launchX = launchX * 0.75 + contactX * 0.25;
+    launchY = launchY * 0.75 + contactY * 0.25;
+
+    const finalLength = Math.hypot(launchX, launchY) || 1;
+    launchX /= finalLength;
+    launchY /= finalLength;
 
     attacker.hitCooldowns[target.id] = now + 450;
-    damageFlailingPlayer(room, target, attacker, nx * 145, ny * 145);
-}
 
+    // force players to get hit
+    target.hitLockUntil = now + 75;
+
+    const launchForce = 230 + Math.min(speed * 0.35, 220);
+
+    damageFlailingPlayer(
+        room,
+        target,
+        attacker,
+        launchX * launchForce,
+        launchY * launchForce
+    );
+}
 function updateFlailingPhysics(room, dt) {
     if (room.state !== "PLAYING") return;
 
-    const elapsed = (Date.now() - room.gameStartedAt) / 1000;
-    const shrink = clamp(elapsed / 150, 0, 1);
-
-    const originalHeight = ARENA_SIZES[room.arena.size] || ARENA_SIZES.medium;
-    const originalWidth = originalHeight * 1.5;
-    const width = originalWidth * (1 - shrink) + 300 * shrink;
-    const height = originalHeight * (1 - shrink) + 210 * shrink;
-
-    room.arena.w = width;
-    room.arena.h = height;
-    room.arena.x = -width / 2;
-    room.arena.y = -height / 2;
+    const now = Date.now();
 
     for (const player of room.players) {
         if (!player.alive) continue;
@@ -382,8 +400,11 @@ function updateFlailingPhysics(room, dt) {
         const previousVx = player.vx;
         const previousVy = player.vy;
 
-        player.vx += dx * 470 * dt;
-        player.vy += dy * 470 * dt;
+        // Player movement
+        if (now >= player.hitLockUntil) {
+            player.vx += dx * 470 * dt;
+            player.vy += dy * 470 * dt;
+        }
 
         player.vx *= Math.pow(0.90, dt * 30);
         player.vy *= Math.pow(0.90, dt * 30);
@@ -400,52 +421,57 @@ function updateFlailingPhysics(room, dt) {
         const playerAx = (player.vx - previousVx) / dt;
         const playerAy = (player.vy - previousVy) / dt;
 
-        // turning should add energy? Centrifugal. Hopefully.
-        if (dx !== 0 || dy !== 0) {
-            const inputAngle = Math.atan2(dy, dx);
+        // The moving player transfers a little energy now
+        player.maceVx += playerAx * 0.28 * dt;
+        player.maceVy += playerAy * 0.28 * dt;
 
-            if (player.lastInputAngle !== null) {
-                let change = inputAngle - player.lastInputAngle;
+        // The mace has its own momentum now!
+        player.maceVx *= Math.pow(0.999, dt * 30);
+        player.maceVy *= Math.pow(0.999, dt * 30);
 
-                while (change > Math.PI) change -= Math.PI * 2;
-                while (change < -Math.PI) change += Math.PI * 2;
+        player.maceX += player.maceVx * dt;
+        player.maceY += player.maceVy * dt;
 
-                player.spinInput = clamp(change / dt, -5, 5);
-            } else {
-                player.spinInput = 0;
+        // Rope should be stress testable.
+        const ropeX = player.maceX - player.x;
+        const ropeY = player.maceY - player.y;
+        const ropeDistance = Math.hypot(ropeX, ropeY);
+
+        if (ropeDistance > player.chainLength) {
+            const nx = ropeX / ropeDistance;
+            const ny = ropeY / ropeDistance;
+
+            // allow full centrigugal force
+            player.maceX = player.x + nx * player.chainLength;
+            player.maceY = player.y + ny * player.chainLength;
+
+            // Hopefully the rope won't break
+            const outwardVelocity =
+                player.maceVx * nx + player.maceVy * ny;
+
+            if (outwardVelocity > 0) {
+                player.maceVx -= nx * outwardVelocity;
+                player.maceVy -= ny * outwardVelocity;
             }
 
-            player.lastInputAngle = inputAngle;
-        } else {
-            player.spinInput *= Math.pow(0.92, dt * 30);
+            // A little momentum goes through the rope
+            player.vx += nx * outwardVelocity * 0.12;
+            player.vy += ny * outwardVelocity * 0.12;
         }
 
-        const tangentX = -Math.sin(player.angle);
-        const tangentY = Math.cos(player.angle);
+        // Actual angle is now working
+        player.angle = Math.atan2(
+            player.maceY - player.y,
+            player.maceX - player.x
+        );
 
-        //Player movement SHOULD add momentum.
-        const tangentialAcceleration = playerAx * tangentX + playerAy * tangentY;
-
-        player.angularVelocity += (tangentialAcceleration / player.chainLength) * 0.32 * dt;
-        player.angularVelocity += player.spinInput * 0.85 * dt;
-
-        // Ice physics..
-        player.angularVelocity *= Math.pow(0.997, dt * 30);
-        player.angularVelocity = clamp(player.angularVelocity, -12, 12);
-
-        player.angle += player.angularVelocity * dt;
-
-        // Hopefully this will pin it so tht I dont have to worry about area issues.
-        player.maceX = player.x + Math.cos(player.angle) * player.chainLength;
-        player.maceY = player.y + Math.sin(player.angle) * player.chainLength;
-
-        // Velocity should include the player as well.
-        player.maceVx = player.vx - Math.sin(player.angle) * player.angularVelocity * player.chainLength;
-        player.maceVy = player.vy + Math.cos(player.angle) * player.angularVelocity * player.chainLength;
+        player.angularVelocity =
+            (player.maceVx * -(player.maceY - player.y) +
+             player.maceVy * (player.maceX - player.x)) /
+            (player.chainLength * player.chainLength || 1);
     }
 
     const alive = room.players.filter(player => player.alive);
-    const now = Date.now();
 
     for (let i = 0; i < alive.length; i++) {
         const a = alive[i];
@@ -454,7 +480,7 @@ function updateFlailingPhysics(room, dt) {
             const b = alive[j];
 
             const bodyDistance = Math.hypot(a.x - b.x, a.y - b.y);
-            const bodyMinimum = 34;
+            const bodyMinimum = 18;
 
             if (bodyDistance < bodyMinimum && bodyDistance > 0) {
                 const nx = (b.x - a.x) / bodyDistance;
@@ -477,6 +503,7 @@ function updateFlailingPhysics(room, dt) {
         }
     }
 
+    // Arena stays fixed now, hopefully.
     for (const player of room.players) {
         if (!player.alive) continue;
 
@@ -490,13 +517,13 @@ function updateFlailingPhysics(room, dt) {
         ) {
             eliminateFlailingPlayer(room, player, "arena");
         }
-    } 
- 
+    }
+
     checkFlailingWinner(room);
     if (room.state !== "PLAYING") return;
 
     io.to(room.code).emit("game:tick", runningGameState(room));
-} 
+}
 
 io.on("connection", socket => {
     socket.emit("connection:ready", { id: socket.id }); 
@@ -532,7 +559,7 @@ io.on("connection", socket => {
 
         const player = newFlailPlayer(socket, data.name);
         player.color = COLORS[room.players.length % COLORS.length];
-
+        hitLockUntil: 0,
         room.players.push(player);
         socketRooms.set(socket.id, code);
         socket.join(code);

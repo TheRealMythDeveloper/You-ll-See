@@ -523,52 +523,91 @@ function drawArena() {
 }
 
 function drawChain(start, end, color) {
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const distance = Math.hypot(dx, dy);
+    const slack = Math.max(0, 90 - distance);
+
+    // Rope droops when it has slack.
+    const sag = Math.min(slack * 0.8, 65);
+
     ctx.save();
-    ctx.strokeStyle = color;
-    ctx.globalAlpha = 0.75;
-    ctx.lineWidth = 3;
+    ctx.lineCap = "round";
+    ctx.lineLineJoin = "round";
+
+    const midX = (start.x + end.x) / 2;
+    const midY = (start.y + end.y) / 2 + sag;
+
     ctx.beginPath();
     ctx.moveTo(start.x, start.y);
-    ctx.lineTo(end.x, end.y);
+    ctx.quadraticCurveTo(midX, midY, end.x, end.y);
+    ctx.strokeStyle = "rgba(210,220,235,0.75)";
+    ctx.lineWidth = 2;
     ctx.stroke();
 
-    const distance = Math.hypot(end.x - start.x, end.y - start.y);
-    const links = Math.max(3, Math.floor(distance / 12));
+    // Small rope links following the curve.
+    const links = Math.floor(distance / 13);
 
     for (let i = 1; i < links; i++) {
         const t = i / links;
-        const x = start.x + (end.x - start.x) * t;
-        const y = start.y + (end.y - start.y) * t;
+        const one = 1 - t;
+
+        const x = one * one * start.x
+            + 2 * one * t * midX
+            + t * t * end.x;
+
+        const y = one * one * start.y
+            + 2 * one * t * midY
+            + t * t * end.y;
 
         ctx.beginPath();
-        ctx.arc(x, y, 2, 0, Math.PI * 2);
-        ctx.fillStyle = "#d6d9e5";
+        ctx.arc(x, y, 1.5, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.globalAlpha = 0.7;
         ctx.fill();
     }
 
     ctx.restore();
 }
 
-function drawFlail(position, color, radius = 13) {
+function drawFlail(position, color, radius = 29) {
     ctx.save();
 
-    ctx.shadowColor = color;
-    ctx.shadowBlur = 20;
-
-    const gradient = ctx.createRadialGradient(position.x - 4, position.y - 4, 2, position.x, position.y, radius);
-    gradient.addColorStop(0, "#ffffff");
-    gradient.addColorStop(0.25, color);
-    gradient.addColorStop(1, "#151923");
-
+    // Outer rim
     ctx.beginPath();
     ctx.arc(position.x, position.y, radius, 0, Math.PI * 2);
-    ctx.fillStyle = gradient;
+    ctx.fillStyle = "#090b10";
     ctx.fill();
 
-    ctx.shadowBlur = 0;
-    ctx.strokeStyle = "rgba(255,255,255,0.7)";
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = color;
     ctx.stroke();
+
+    // Heavy metal center
+    ctx.beginPath();
+    ctx.arc(position.x, position.y, radius - 4, 0, Math.PI * 2);
+    ctx.fillStyle = "#252b36";
+    ctx.fill();
+
+    // Small specular highlight
+    ctx.beginPath();
+    ctx.arc(
+        position.x - radius * 0.28,
+        position.y - radius * 0.28,
+        radius * 0.16,
+        0,
+        Math.PI * 2
+    );
+    ctx.fillStyle = "#ffffff";
+    ctx.globalAlpha = 0.65;
+    ctx.fill();
+
+    // Minimal colored center
+    ctx.globalAlpha = 1;
+    ctx.beginPath();
+    ctx.arc(position.x, position.y, 3, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
 
     ctx.restore();
 }
@@ -580,49 +619,47 @@ function drawPlayer(player, index) {
     const color = getPlayerColor(player, index);
     const worldPos = getPlayerPosition(player);
     const flailWorld = getFlailPosition(player);
+
     const pos = worldToScreen(worldPos.x, worldPos.y);
     const flail = worldToScreen(flailWorld.x, flailWorld.y);
     const isMe = id === localPlayerId;
-    const radius = getNumber(player, ["radius", "size"], 17);
 
+    const playerRadius = 7;
+    const maceRadius = 29;
+
+    // Rope first, behind both objects
     drawChain(pos, flail, color);
-    drawFlail(flail, color, getNumber(player, ["flailRadius", "maceRadius"], 13));
 
+    // Mace
+    drawFlail(flail, color, maceRadius);
+
+    // Player
     ctx.save();
 
-    ctx.shadowColor = color;
-    ctx.shadowBlur = isMe ? 25 : 15;
-
-    const gradient = ctx.createRadialGradient(pos.x - 6, pos.y - 6, 2, pos.x, pos.y, radius);
-    gradient.addColorStop(0, "#ffffff");
-    gradient.addColorStop(0.3, color);
-    gradient.addColorStop(1, color);
-
     ctx.beginPath();
-    ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
-    ctx.fillStyle = gradient;
+    ctx.arc(pos.x, pos.y, playerRadius, 0, Math.PI * 2);
+    ctx.fillStyle = color;
     ctx.fill();
 
-    ctx.shadowBlur = 0;
-    ctx.strokeStyle = isMe ? "#ffffff" : "rgba(255,255,255,0.6)";
-    ctx.lineWidth = isMe ? 2.5 : 1.2;
+    ctx.lineWidth = isMe ? 2 : 1;
+    ctx.strokeStyle = "#ffffff";
     ctx.stroke();
 
+    // Subtle ring for the local player
     if (isMe) {
         ctx.beginPath();
-        ctx.arc(pos.x, pos.y, radius + 6, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(255,255,255,0.3)";
+        ctx.arc(pos.x, pos.y, playerRadius + 4, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(255,255,255,0.35)";
         ctx.lineWidth = 1;
         ctx.stroke();
     }
 
+    // Name
     ctx.font = "600 12px Inter";
     ctx.textAlign = "center";
     ctx.textBaseline = "bottom";
     ctx.fillStyle = "#ffffff";
-    ctx.shadowColor = "#000000";
-    ctx.shadowBlur = 8;
-    ctx.fillText(getPlayerNameFromData(player), pos.x, pos.y - radius - 10);
+    ctx.fillText(getPlayerNameFromData(player), pos.x, pos.y - playerRadius - 9);
 
     ctx.restore();
 }
@@ -643,6 +680,7 @@ function drawGame() {
     drawArena();
 
     players.forEach(drawPlayer);
+    drawParticles();
 
     const aliveElement = $("aliveCount");
     if (aliveElement) aliveElement.textContent = `ALIVE: ${alivePlayers.length}`;
