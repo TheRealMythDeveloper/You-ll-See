@@ -13,7 +13,7 @@ const ctx = canvas.getContext("2d");
 
 let currentScreen = "menu";
 let isHost = false;
- const isReady = false;
+ let isReady = false;
 let gameRunning = false;
 let localPlayerId = null;
 let currentRoom = null;
