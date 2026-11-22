@@ -371,7 +371,7 @@ function tryFlailingHit(room, attacker, target, now) {
 
     attacker.hitCooldowns[target.id] = now + 450;
 
-    // force players to get hit
+    
  target.hitLockUntil = now + 75;
 
     const launchForce = 230 + Math.min(speed * 0.35, 220);
@@ -405,9 +405,6 @@ function updateFlailingPhysics(room, dt) {
     const maceDrag = 0.9997;
  const ropeBounce = 0;
 
-    // =====================================================
-    // PLAYER + MACE PHYSICS
-    // =====================================================
  for (const player of room.players) {
         if (!player.alive) continue;
 
@@ -423,9 +420,7 @@ function updateFlailingPhysics(room, dt) {
 
         for (let sub = 0; sub < substeps; sub++) {
 
-            // -------------------------------
-            // READ INPUT
-            // -------------------------------
+           
             let inputX = 0;
  let inputY = 0;
 
@@ -441,26 +436,20 @@ function updateFlailingPhysics(room, dt) {
                 inputY /= inputLength;
             }
 
-            // -------------------------------
-            // PLAYER ACCELERATION
-            // -------------------------------
+           
             if (now >= player.hitLockUntil) {
                 player.vx += inputX * playerAcceleration * step;
  player.vy += inputY * playerAcceleration * step;
             }
 
-            // -------------------------------
-            // DRAG
-            // -------------------------------
+        
             player.vx *= Math.pow(playerDrag, step * 60);
  player.vy *= Math.pow(playerDrag, step * 60);
 
             player.maceVx *= Math.pow(maceDrag, step * 60);
  player.maceVy *= Math.pow(maceDrag, step * 60);
 
-            // -------------------------------
-            // LIMIT SPEED
-            // -------------------------------
+            
             let playerSpeed = Math.hypot(player.vx, player.vy);
 
             if (playerSpeed > maxPlayerSpeed) {
@@ -475,18 +464,14 @@ function updateFlailingPhysics(room, dt) {
  player.maceVy = (player.maceVy / maceSpeed) * maxMaceSpeed;
             }
 
-            // -------------------------------
-            // MOVE BOTH OBJECTS
-            // -------------------------------
+          
             player.x += player.vx * step;
  player.y += player.vy * step;
 
             player.maceX += player.maceVx * step;
  player.maceY += player.maceVy * step;
 
-            // -------------------------------
-            // ROPE CONSTRAINT
-            // -------------------------------
+          
             const ropeX = player.x - player.maceX;
  const ropeY = player.y - player.maceY;
             const distance = Math.hypot(ropeX, ropeY);
@@ -495,7 +480,7 @@ function updateFlailingPhysics(room, dt) {
                 const nx = ropeX / distance;
  const ny = ropeY / distance;
 
-                // Rope correction. Both bodies move according to mass.
+              
                 const excess = distance - player.chainLength;
  const totalInverseMass = playerInverseMass + maceInverseMass;
 
@@ -505,12 +490,12 @@ function updateFlailingPhysics(room, dt) {
                 player.maceX += nx * excess * (maceInverseMass / totalInverseMass);
  player.maceY += ny * excess * (maceInverseMass);
 
-                // Relative velocity along the rope.
+            
                 const relativeVx = player.vx - player.maceVx;
  const relativeVy = player.vy - player.maceVy;
                 const outwardVelocity = relativeVx * nx + relativeVy * ny;
 
-                // Remove velocity that would stretch the rope.
+              
                 if (outwardVelocity > 0) {
                     const impulse = (1 + ropeBounce) * outwardVelocity / totalInverseMass;
 
@@ -523,9 +508,7 @@ function updateFlailingPhysics(room, dt) {
             }
         }
 
-        // -------------------------------
-        // FINAL PLAYER / MACE VALUES
-        // -------------------------------
+  
  player.angle = Math.atan2(
             player.y - player.maceY,
         player.x - player.maceX
@@ -541,9 +524,7 @@ function updateFlailingPhysics(room, dt) {
         player.macePrevY = player.maceY - player.maceVy * frameTime;
     }
 
-    // =====================================================
-    // PLAYER-TO-PLAYER COLLISIONS
-    // =====================================================
+   
  const alive = room.players.filter(player => player.alive);
 
     for (let i = 0; i < alive.length; i++) {
@@ -563,13 +544,13 @@ function updateFlailingPhysics(room, dt) {
  const ny = dy / distance;
                 const overlap = minimum - distance;
 
-                // Separate players.
+            
                 a.x -= nx * overlap * 0.5;
  a.y -= ny * overlap * 0.5;
                 b.x += nx * overlap * 0.5;
  b.y += ny * overlap * 0.5;
 
-                // Bounce them apart.
+          
                 const relativeVelocity =
                     (b.vx - a.vx) * nx +
                     (b.vy - a.vy) * ny;
@@ -589,9 +570,7 @@ function updateFlailingPhysics(room, dt) {
         }
     }
 
-    // =====================================================
-    // MACE-TO-MACE COLLISIONS
-    // =====================================================
+
  for (let i = 0; i < alive.length; i++) {
         const a = alive[i];
 
@@ -609,7 +588,7 @@ function updateFlailingPhysics(room, dt) {
  const ny = dy / distance;
             const overlap = minimum - distance;
 
-            // Separate mace heads.
+          
             a.maceX -= nx * overlap * 0.5;
  a.maceY -= ny * overlap * 0.5;
             b.maceX += nx * overlap * 0.5;
@@ -630,9 +609,6 @@ function updateFlailingPhysics(room, dt) {
         }
     }
 
-    // =====================================================
-    // ARENA WALL COLLISIONS
-    // =====================================================
  const wallPadding = 12;
 
     const left = room.arena.x + wallPadding;
@@ -643,7 +619,7 @@ function updateFlailingPhysics(room, dt) {
     for (const player of room.players) {
         if (!player.alive) continue;
 
-        // Player wall bounce
+        
         if (player.x < left) {
             player.x = left;
  if (player.vx < 0) player.vx *= -0.65;
@@ -664,7 +640,7 @@ function updateFlailingPhysics(room, dt) {
             if (player.vy > 0) player.vy *= -0.65;
         }
 
-        // Mace wall bounce
+      
         if (player.maceX < left) {
             player.maceX = left;
  if (player.maceVx < 0) player.maceVx *= -0.65;
@@ -685,7 +661,7 @@ function updateFlailingPhysics(room, dt) {
             if (player.maceVy > 0) player.maceVy *= -0.65;
         }
 
-        // Recheck the rope after hitting walls.
+       
         const dx = player.x - player.maceX;
  const dy = player.y - player.maceY;
         const distance = Math.hypot(dx, dy);
@@ -707,7 +683,7 @@ function updateFlailingPhysics(room, dt) {
             }
         }
 
-        // Update the mace velocity used by hit detection.
+      
  player.macePrevX = player.maceX - player.maceVx * frameTime;
         player.macePrevY = player.maceY - player.maceVy * frameTime;
 
@@ -845,7 +821,7 @@ setInterval(() => {
 
  tickCount++;
 
-    // Network updates at 40Hz instead of 80Hz
+    //fix network
     if (tickCount % 2 === 0) {
         for (const room of rooms.values()) {
  if (room.state !== "PLAYING") continue;

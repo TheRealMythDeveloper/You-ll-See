@@ -725,7 +725,7 @@ const distance = Math.hypot(dx, dy);
        ctx.beginPath();
      ctx.arc(x, y, 1.4, 0, Math.PI * 2);
        ctx.fillStyle = color;
-        ctx.fill(); // FIXED
+        ctx.fill(); 
     }
 
  ctx.restore();
@@ -758,11 +758,11 @@ function drawFlail(position, color, radius = 29) {
     );
     ctx.fillStyle = "#ffffff";
     ctx.globalAlpha = 0.65;
-    ctx.fill(); // FIXED
+    ctx.fill(); 
 
     ctx.globalAlpha = 1;
     ctx.beginPath();
-    ctx.arc(position.x, position.y, 3, 0, Math.PI * 2);
+    ctx.arc(position.x, position.y, 3, 0, Math.PI * 2); 
     ctx.fillStyle = color;
     ctx.fill();
 
