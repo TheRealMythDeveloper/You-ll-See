@@ -158,7 +158,7 @@ function updateLobby(data) {
  $("roomCodeDisplay").textContent = code;
     $("playerCount").textContent = `${players.length}/5 PLAYERS`;
 
-    const hostId = room.hostId || room.host || room.ownerId;
+    let hostId = room.hostId || room.host || room.ownerId;
  const me = players.find(player => getPlayerId(player) === localPlayerId);
 
     if (me) {
