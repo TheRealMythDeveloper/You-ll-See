@@ -9,7 +9,7 @@
     --accent2: #6366f1;
     --green: #39e98b;
     --red: #ff5267;
-    --glow: rgba(139,92,246,0.22);
+   
 }
 
 * {
@@ -27,8 +27,8 @@ body {
     color: var(--text);
     font-family: 'Inter', sans-serif;
     background:
-        radial-gradient(ellipse at 50% -15%, rgba(99,102,241,0.18), transparent 55%),
-        radial-gradient(ellipse at 0% 100%, rgba(168,85,247,0.06), transparent 40%),
+        rgba(99,102,241,0.18),
+       rgba(168,85,247,0.06),
         var(--bg);
     overflow-x: hidden;
 }
@@ -131,8 +131,22 @@ select {
 }
 
 #results {
-    margin-top: 7vh;
-    text-align: center;
+     position: fixed;
+   
+    height: 100vh;
+    height: 100dvh;
+    margin: 45px auto;
+    inset: 0 ;
+    padding: 32px;
+    background: rgba(13,18,29,0.95);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    box-shadow: 0 25px 100px rgba(0,0,0,0.45);
+    backdrop-filter: blur(22px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    
 }
 
 h1,
@@ -144,7 +158,7 @@ p {
 
 h1,
 #resultTitle {
-    font-family: 'Orbitron', sans-serif;
+    font-family: Georgia, sans-serif;
     font-weight: 800;
 }
 
@@ -154,7 +168,7 @@ h1 {
     letter-spacing: 5px;
     text-align: center;
     margin: 18px 0 12px;
-    background: linear-gradient(135deg, #fff 15%, #d7c7ff 48%, #818cf8 90%);
+    background:  #818cf8 90%;
     background-clip: text;
     -webkit-background-clip: text;
     color: transparent;
@@ -169,7 +183,7 @@ h2 span,
 }
 
 h2 {
-    font-family: 'Orbitron', sans-serif;
+    font-family: Georgia, sans-serif;
     letter-spacing: 2px;
     font-size: 26px;
     margin-bottom: 25px;
@@ -204,7 +218,7 @@ h3 {
     position: absolute;
     width: 8px;
     height: 26px;
-    background: linear-gradient(180deg, #c084fc, #6366f1);
+    background: #6366f1;
     border-radius: 8px;
 }
 
@@ -217,7 +231,7 @@ h3 {
 }
 
 .brand-name {
-    font-family: 'Orbitron', sans-serif;
+    font-family: Georgia, sans-serif;
     font-size: 20px;
     font-weight: 900;
     letter-spacing: 3px;
@@ -315,7 +329,7 @@ h3 {
 
 .primary-button {
     color: white;
-    background: linear-gradient(120deg, #9333ea, #6366f1);
+    background:  #6366f1;
     box-shadow: 0 6px 25px rgba(124,58,237,0.18);
 }
 
@@ -373,7 +387,7 @@ h3 {
 #roomCodeInput {
     margin: 0;
     text-align: center;
-    font-family: 'Orbitron', sans-serif;
+    font-family: Georgia, sans-serif;
     font-weight: 700;
     letter-spacing: 4px;
 }
@@ -487,7 +501,6 @@ h3 {
     margin-bottom: 24px;
     text-align: center;
     background:
-        radial-gradient(ellipse at 50% 0%, rgba(139,92,246,0.12), transparent 75%),
         #0b111c;
     border: 1px solid rgba(168,85,247,0.16);
     border-radius: 14px;
@@ -509,7 +522,7 @@ h3 {
 
 #roomCodeDisplay {
     color: #d3c5ff;
-    font-family: 'Orbitron', sans-serif;
+    font-family: Georgia, sans-serif;
     font-size: 31px;
     font-weight: 800;
     letter-spacing: 8px;
@@ -831,7 +844,7 @@ h3 {
 
 .hud-logo {
     color: #e5e9f4;
-    font-family: 'Orbitron', sans-serif;
+    font-family: serif, Georgia;
     font-size: 13px;
     font-weight: 900;
     letter-spacing: 2px;
@@ -853,7 +866,7 @@ h3 {
     border: 1px solid var(--border);
     border-radius: 10px;
     backdrop-filter: blur(12px);
-    font-family: 'Orbitron', sans-serif;
+    font-family: Georgia, sans-serif;
     font-size: 10px;
     font-weight: 700;
     letter-spacing: 1px;
