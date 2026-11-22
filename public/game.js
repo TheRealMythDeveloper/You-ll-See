@@ -637,7 +637,7 @@ function drawBackground() {
 
     for (let x = offsetX; x < width; x += grid) {
         ctx.moveTo(x, 0);
- lineTo(x, height);
+ ctx.lineTo(x, height);
     }
 
     for (let y = offsetY; y < height; y += grid) {
