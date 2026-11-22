@@ -735,7 +735,7 @@ function drawFlail(position, color, radius = 29) {
     ctx.save();
 
     ctx.beginPath();
- ctx.arc(position.x, position.y, radius, 0, Math.PI * 2);
+    ctx.arc(position.x, position.y, radius, 0, Math.PI * 2);
     ctx.fillStyle = "#090b10";
     ctx.fill();
 
@@ -745,24 +745,24 @@ function drawFlail(position, color, radius = 29) {
 
     ctx.beginPath();
     ctx.arc(position.x, position.y, radius - 4, 0, Math.PI * 2);
- ctx.fillStyle = "#252b36";
+    ctx.fillStyle = "#252b36";
     ctx.fill();
 
     ctx.beginPath();
     ctx.arc(
-        position.x - radius * 0.28,
- position.y - radius * 0.28,
+        position.x - radius * 0.28, 
+        position.y - radius * 0.28,
         radius * 0.16,
- 0,
+        0,
         Math.PI * 2
     );
     ctx.fillStyle = "#ffffff";
     ctx.globalAlpha = 0.65;
- fill();
+    ctx.fill(); // FIXED
 
     ctx.globalAlpha = 1;
     ctx.beginPath();
- ctx.arc(position.x, position.y, 3, 0, Math.PI * 2);
+    ctx.arc(position.x, position.y, 3, 0, Math.PI * 2);
     ctx.fillStyle = color;
     ctx.fill();
 
@@ -776,7 +776,7 @@ function drawPlayer(player, index) {
     const color = getPlayerColor(player, index);
 
     const worldPos = getPlayerPosition(player);
- const flailWorld = getFlailPosition(player);
+ const flailWorld = getFlailPosition(player); 
 
     const pos = worldToScreen(worldPos.x, worldPos.y);
  const flail = worldToScreen(flailWorld.x, flailWorld.y);
