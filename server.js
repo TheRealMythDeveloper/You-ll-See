@@ -211,8 +211,7 @@ function startFlailing(room, socket) {
  if (room.hostId !== socket.id) return false;
     if (room.players.length < 2) return false;
  if (room.players.some(player => !player.ready && player.id !== room.hostId)) return false;
-    player.lastPlayerX = player.x;
-player.lastPlayerY = player.y;
+    
 
     const height = ARENA_SIZES[room.arena.size] || ARENA_SIZES.medium;
  const width = height * 1.5;
@@ -246,6 +245,8 @@ player.lastPlayerY = player.y;
  player.outOfBoundsTime = 0;
         player.x = Math.cos(angle) * startRadius;
  player.y = Math.sin(angle) * startRadius;
+ player.lastPlayerX = player.x;
+player.lastPlayerY = player.y;
         player.angle = random(0, Math.PI * 2);
  player.angularVelocity = random(-0.4, 0.4);
         player.lastInputAngle = null;
