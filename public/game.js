@@ -637,7 +637,7 @@ function drawBackground() {
 
     for (let x = offsetX; x < width; x += grid) {
         ctx.moveTo(x, 0);
- ctx.lineTo(x, height);
+ ctx.lineTo(x, height); 
     }
 
     for (let y = offsetY; y < height; y += grid) {
@@ -690,49 +690,45 @@ function drawArena() {
     ctx.setLineDash([]);
  ctx.restore();
 }
-
 function drawChain(start, end, color, chainLength = 90) {
-    const dx = end.x - start.x;
- const dy = end.y - start.y;
-    const distance = Math.hypot(dx, dy);
+   const dx = end.x - start.x;
+const dy = end.y - start.y;
+const distance = Math.hypot(dx, dy);
 
-    const slack = Math.max(0, chainLength - distance);
- const sag = Math.min(slack * 0.55, 45);
+  const slack = Math.max(0, chainLength - distance);
+   const sag = Math.min(slack * 0.55, 45);
 
-    const midX = (start.x + end.x) / 2;
- const midY = (start.y + end.y) / 2 + sag;
+ const midX = (start.x + end.x) / 2;
+    const midY = (start.y + end.y) / 2 + sag;
 
     ctx.save();
- ctx.lineCap = "round";
+    ctx.lineCap = "round";
 
     ctx.beginPath();
     ctx.moveTo(start.x, start.y);
- ctx.quadraticCurveTo(midX, midY, end.x, end.y);
-    ctx.strokeStyle = "#b8c2d4";
- ctx.lineWidth = 2;
+    ctx.quadraticCurveTo(midX, midY, end.x, end.y); ctx.strokeStyle = "#b8c2d4";
+    ctx.lineWidth = 2;
     ctx.stroke();
-
-    const links = Math.floor(distance / 12);
+ const links = Math.floor(distance / 12);
 
     for (let i = 1; i < links; i++) {
- const t = i / links;
+       const t = i / links;
         const inv = 1 - t;
 
-        const x = inv * inv * start.x +
-            2 * inv * t * midX +
-            t * t * end.x;
+    const x = inv * inv * start.x +
+            2 * inv * t * midX +     t * t * end.x;
 
         const y = inv * inv * start.y +
             2 * inv * t * midY +
             t * t * end.y;
 
-        ctx.beginPath();
-        ctx.arc(x, y, 1.4, 0, Math.PI * 2);
-        ctx.fillStyle = color;
- fill();
+       ctx.beginPath();
+     ctx.arc(x, y, 1.4, 0, Math.PI * 2);
+       ctx.fillStyle = color;
+        ctx.fill(); // FIXED
     }
 
-    ctx.restore();
+ ctx.restore();
 }
 
 function drawFlail(position, color, radius = 29) {
